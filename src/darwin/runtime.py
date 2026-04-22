@@ -5,10 +5,14 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from darwin.agent import Darwin
+from darwin.composer import NaturalLanguageComposer
+from darwin.critic import Critique, ResponseCritic
+from darwin.discourse import DiscoursePlanner, ResponsePlan
 from darwin.embodiment import ConversationAdapter, EnvironmentAdapter
 from darwin.experiments import ExperimentResult
-from darwin.language import LanguageCortex
+from darwin.retrieval import ContextRetriever, RetrievalPacket
 from darwin.storage import PersistentStore
+from darwin.thought import ThoughtTrace
 from darwin.types import Action, Goal, Transition
 
 
@@ -37,10 +41,17 @@ class DarwinRuntime:
         self.store = store or darwin.store
         self.interval = interval
         self.conversation = ConversationAdapter()
-        self.language = LanguageCortex()
+        self.retriever = ContextRetriever()
+        self.discourse = DiscoursePlanner()
+        self.composer = NaturalLanguageComposer()
+        self.critic = ResponseCritic()
         self.events: list[RuntimeEvent] = []
         self.event_sink = event_sink
         self.stream_enabled = True
+        self.last_thought_trace: ThoughtTrace | None = None
+        self.last_retrieval: RetrievalPacket | None = None
+        self.last_response_plan: ResponsePlan | None = None
+        self.last_critique: Critique | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.RLock()
@@ -156,15 +167,79 @@ class DarwinRuntime:
                 self._event("error", f"runtime cycle failed: {exc!r}")
 
     def _respond(self, message: str, semantic_frame) -> str:
-        return self.language.respond(
-            message=message,
+        trace = ThoughtTrace(user_text=message, semantic_summary=semantic_frame.summary())
+        trace.add(
+            "parse",
+            semantic_frame.summary(),
+            confidence=semantic_frame.confidence,
+            evidence=[semantic_frame.original_text],
+        )
+
+        retrieval = self.retriever.retrieve(
+            self.darwin,
+            semantic_frame,
+            recent_events=self.recent_events(limit=8),
+        )
+        trace.add(
+            "retrieve",
+            retrieval.summary(),
+            confidence=0.5 if retrieval.items else 0.2,
+            evidence=[item.content for item in retrieval.top(3)],
+        )
+
+        plan = self.discourse.plan(
+            frame=semantic_frame,
+            packet=retrieval,
             darwin=self.darwin,
             adapter=self.adapter,
             goal=self.goal,
             recent_events=self.recent_events(limit=5),
-            conversation=self.conversation,
-            semantic_frame=semantic_frame,
         )
+        trace.add(
+            "plan",
+            f"{plan.mode}: {plan.intent}",
+            confidence=plan.confidence,
+            evidence=plan.answer_points[:3],
+        )
+
+        draft = self.composer.compose(plan, semantic_frame, trace)
+        critique = self.critic.evaluate(plan, draft, semantic_frame, retrieval)
+        if not critique.passed:
+            trace.add(
+                "critic",
+                critique.summary(),
+                confidence=0.45,
+                evidence=critique.revisions,
+            )
+            plan = self.critic.revise(plan, critique, semantic_frame, retrieval)
+            draft = self.composer.compose(plan, semantic_frame, trace)
+            critique = self.critic.evaluate(plan, draft, semantic_frame, retrieval)
+        else:
+            trace.add("critic", "response passed self-critique", confidence=0.75)
+
+        trace.final_mode = plan.mode
+        trace.final_confidence = plan.confidence
+        self.last_thought_trace = trace
+        self.last_retrieval = retrieval
+        self.last_response_plan = plan
+        self.last_critique = critique
+
+        if self.store is not None:
+            self.store.record_thought("thought_trace", trace.compact(), trace.to_record())
+            self.store.record_thought("response_plan", plan.thesis, plan.to_record())
+            self.store.record_thought("response_critique", critique.summary(), critique.to_record())
+
+        self._event(
+            "thought",
+            trace.compact(),
+            {
+                "trace": trace.to_record(),
+                "retrieval": retrieval.to_record(),
+                "plan": plan.to_record(),
+                "critique": critique.to_record(),
+            },
+        )
+        return draft
 
     def _experiment_event(self, result: ExperimentResult) -> RuntimeEvent:
         if result.confirmed:

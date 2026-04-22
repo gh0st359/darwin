@@ -245,7 +245,21 @@ class SemanticParser:
             "world_model": {"world model", "reality", "world", "cause and effect", "causality"},
         }
         self.topic_keywords: dict[str, set[str]] = {
-            "language": {"language", "meaning", "understand", "semantics", "parser", "word", "sentence"},
+            "language": {
+                "language",
+                "meaning",
+                "understand",
+                "semantics",
+                "parser",
+                "word",
+                "sentence",
+                "grounding",
+                "grounded",
+                "regurgitation",
+                "parroting",
+                "imitation",
+                "repeating",
+            },
             "learning": {"learn", "training", "teach", "memory", "dataset", "data"},
             "planning": {"plan", "goal", "future", "strategy", "simulate"},
             "experiments": {"experiment", "test", "uncertain", "hypothesis", "prove"},

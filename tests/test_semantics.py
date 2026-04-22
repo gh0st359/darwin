@@ -48,7 +48,7 @@ class SemanticLanguageTests(unittest.TestCase):
 
         response = runtime.chat("Darwin, learn this: natural language should be grounded in meaning.")
 
-        self.assertIn("recorded", response.lower())
+        self.assertIn("meaning", response.lower())
         recent = darwin.semantic_memory.recent(limit=2)
         self.assertEqual(recent[0].source, "user")
         self.assertEqual(recent[1].source, "darwin")
@@ -78,4 +78,3 @@ class SemanticLanguageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

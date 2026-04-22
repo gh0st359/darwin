@@ -17,7 +17,7 @@ formation, memory, and consequence-aware planning.
 
 ## What exists now
 
-Darwin V0.2 includes:
+Darwin V0.3 includes:
 
 - a causal model that learns action effects from intervention traces
 - conditional effect learning, such as "toggle changes the switch differently
@@ -35,6 +35,12 @@ Darwin V0.2 includes:
 - a symbolic semantic language engine that parses conversation into speech
   acts, goals, values, claims, hypotheses, corrections, instructions,
   questions, unknown terms, and grounded internal symbols
+- a cognitive response pipeline that parses, retrieves memory, builds a
+  thought trace, plans discourse, composes natural language, and self-critiques
+  before speaking
+- incremental text streaming in the live CLI
+- inspectable reasoning commands for thoughts, retrieved memories, and
+  response critique
 - embodiment adapters, currently for the room simulation and conversation
 - an always-on runtime loop that can think, experiment, dream, and chat
 - a small deterministic world for testing causal adaptation
@@ -77,8 +83,12 @@ Commands:
 /dream        consolidate memory and concepts
 /run N        run N cognition cycles
 /plan         show the current multi-step plan
+/thoughts     show last internal thought trace
+/reason       show compact reasoning summary
+/retrieved    show memories used for last response
+/critic       show self-critique of last response
 /trace        show recent runtime events
-/stream on|off show or hide live background thoughts
+/stream       inspect or change thought/text streaming
 /exit         shut down cleanly
 ```
 
@@ -87,10 +97,19 @@ simple signals from it, and folds it into memory and concepts without using an
 LLM.
 
 When background cognition is enabled, Darwin streams live cognition events such
-as experiments and reflections into the terminal. Ask "what are you thinking?"
-to get a natural-language summary of the recent thought thread.
+as experiments and reflections into the terminal. Spoken replies can also stream
+incrementally with `--text-delay`, and can be toggled with `/stream text on|off`.
+Ask "what are you thinking?" to get a natural-language summary of the recent
+thought thread, or use `/thoughts` when you want the raw trace.
 Ask "what did you understand?" or run `/semantics` to inspect Darwin's parsed
 meaning frames.
+
+Darwin's replies are not mapped from fixed prompts to fixed outputs. The current
+speech layer uses deterministic symbolic machinery: semantic parse, contextual
+retrieval, a thought trace, a discourse plan, a compositional natural-language
+realizer, and a response critic. This is still early, but the answer is composed
+from Darwin's current state and memory rather than chosen from a scripted chat
+table.
 
 ## Repository map
 
@@ -102,15 +121,21 @@ src/darwin/
   causal.py            Causal transition learner
   cli.py               Command line entrypoint
   concepts.py          Concept formation from experience
+  composer.py          Natural-language surface realization from response plans
+  critic.py            Response self-critique before speech
+  discourse.py         Discourse planning from semantic state and retrieval
   embodiment.py        Simulation and conversation adapters
   experiments.py       Active experiment proposal/evaluation
   language.py          State-grounded natural-language cortex
   memory.py            Episodic and semantic memory
   planner.py           Consequence-aware action ranking
+  retrieval.py         Context retrieval over semantic, causal, and runtime memory
   runtime.py           Always-on cognition loop
   self_model.py        Metacognition and learning priorities
   semantics.py         Symbolic/conceptual language parser and semantic memory
   storage.py           SQLite durable memory
+  streaming.py         Incremental CLI text output
+  thought.py           Inspectable response-cycle thought traces
   types.py             Shared data structures
   world_model.py       Structured world model and hypotheses
   worlds.py            Test environments

@@ -7,6 +7,7 @@ from pathlib import Path
 from darwin.agent import Darwin
 from darwin.embodiment import RoomSimulationAdapter
 from darwin.runtime import DarwinRuntime, ensure_chat_action
+from darwin.streaming import StreamingSpeaker
 from darwin.storage import PersistentStore
 from darwin.types import Goal
 from darwin.worlds import AdaptiveRoomWorld
@@ -28,6 +29,8 @@ def main(argv: list[str] | None = None) -> int:
     live_parser.add_argument("--interval", type=float, default=3.0)
     live_parser.add_argument("--no-background", action="store_true")
     live_parser.add_argument("--no-stream", action="store_true")
+    live_parser.add_argument("--no-text-stream", action="store_true")
+    live_parser.add_argument("--text-delay", type=float, default=0.012)
 
     args = parser.parse_args(argv)
     if args.command == "run":
@@ -40,6 +43,8 @@ def main(argv: list[str] | None = None) -> int:
             args.interval,
             not args.no_background,
             not args.no_stream,
+            not args.no_text_stream,
+            args.text_delay,
         )
     return 1
 
@@ -97,6 +102,8 @@ def live(
     interval: float,
     background: bool,
     stream: bool,
+    text_stream: bool,
+    text_delay: float,
 ) -> int:
     world = AdaptiveRoomWorld(seed=seed)
     adapter = RoomSimulationAdapter(world)
@@ -133,6 +140,7 @@ def live(
         event_sink=stream_event,
     )
     runtime.set_streaming(stream)
+    speaker = StreamingSpeaker(enabled=text_stream, delay=text_delay)
 
     print("Project Darwin live")
     print(f"memory={memory_path}")
@@ -141,8 +149,10 @@ def live(
         runtime.start()
         print(f"background cognition=on interval={interval:.1f}s")
         print(f"thought stream={'on' if stream else 'off'}")
+        print(f"text stream={'on' if speaker.enabled else 'off'}")
     else:
         print("background cognition=off")
+        print(f"text stream={'on' if speaker.enabled else 'off'}")
 
     try:
         while True:
@@ -155,19 +165,24 @@ def live(
             if not message:
                 continue
             if message.startswith("/"):
-                should_continue = _handle_command(message, runtime, goal)
+                should_continue = _handle_command(message, runtime, goal, speaker)
                 if not should_continue:
                     break
             else:
                 with print_lock:
-                    print(runtime.chat(message))
+                    speaker.write(runtime.chat(message))
     finally:
         runtime.stop()
 
     return 0
 
 
-def _handle_command(message: str, runtime: DarwinRuntime, goal: Goal) -> bool:
+def _handle_command(
+    message: str,
+    runtime: DarwinRuntime,
+    goal: Goal,
+    speaker: StreamingSpeaker,
+) -> bool:
     parts = message.split()
     command = parts[0].lower()
 
@@ -187,8 +202,12 @@ def _handle_command(message: str, runtime: DarwinRuntime, goal: Goal) -> bool:
                     "/dream        consolidate memory and concepts",
                     "/run N        run N cognition cycles",
                     "/plan         show the current multi-step plan",
+                    "/thoughts     show last internal thought trace",
+                    "/reason       show compact reasoning summary",
+                    "/retrieved    show memories used for last response",
+                    "/critic       show self-critique of last response",
                     "/trace        show recent runtime events",
-                    "/stream on|off show or hide live background thoughts",
+                    "/stream       inspect or change thought/text streaming",
                     "/exit         shut down cleanly",
                 ]
             )
@@ -290,13 +309,66 @@ def _handle_command(message: str, runtime: DarwinRuntime, goal: Goal) -> bool:
             print(f"- {event.kind}: {event.content}")
         return True
 
+    if command == "/thoughts":
+        trace = runtime.last_thought_trace
+        if trace is None:
+            print("No thought trace yet.")
+            return True
+        print(trace.semantic_summary)
+        for step in trace.steps:
+            print(f"- {step.label} [{step.confidence:.2f}]: {step.content}")
+            for evidence in step.evidence[:3]:
+                print(f"  evidence: {evidence}")
+        return True
+
+    if command == "/reason":
+        trace = runtime.last_thought_trace
+        print(trace.compact() if trace is not None else "No reasoning trace yet.")
+        return True
+
+    if command == "/retrieved":
+        packet = runtime.last_retrieval
+        if packet is None:
+            print("No retrieval packet yet.")
+            return True
+        for item in packet.top(12):
+            print(f"- {item.kind}:{item.title} score={item.score:.2f}")
+            print(f"  {item.content}")
+        return True
+
+    if command == "/critic":
+        critique = runtime.last_critique
+        if critique is None:
+            print("No critique yet.")
+            return True
+        print(f"passed={critique.passed}")
+        for issue in critique.issues:
+            print(f"- issue: {issue}")
+        for revision in critique.revisions:
+            print(f"- revision: {revision}")
+        return True
+
     if command == "/stream":
         if len(parts) == 1:
             print(f"thought stream={'on' if runtime.stream_enabled else 'off'}")
+            print(f"text stream={'on' if speaker.enabled else 'off'}")
+            return True
+        if len(parts) >= 3 and parts[1].lower() in {"text", "thought", "thoughts"}:
+            target = parts[1].lower()
+            value = parts[2].lower()
+            if value not in {"on", "off"}:
+                print("Usage: /stream text on|off or /stream thoughts on|off")
+                return True
+            if target == "text":
+                speaker.enabled = value == "on"
+                print(f"text stream={value}")
+            else:
+                runtime.set_streaming(value == "on")
+                print(f"thought stream={value}")
             return True
         value = parts[1].lower()
         if value not in {"on", "off"}:
-            print("Usage: /stream on|off")
+            print("Usage: /stream on|off, /stream text on|off, or /stream thoughts on|off")
             return True
         runtime.set_streaming(value == "on")
         print(f"thought stream={value}")

@@ -1,0 +1,30 @@
+{
+  "status": "completed",
+  "cycle": 685,
+  "elapsed_seconds": 3605.8,
+  "remaining_seconds": 0,
+  "semantic_summary": "semantic_frames=1854 top_topic=language top_act=question top_value=importance top_unknown=confidence",
+  "self_report": [
+    "observations=949",
+    "known_actions=7",
+    "known_variables=17",
+    "strongest_belief=if always: chat_with_user->conversation_active None -> True conf=1.00",
+    "weakest_area=close_curtains:room_bright",
+    "learning_priority=find hidden conditions for close_curtains:room_bright",
+    "competence=chat_with_user:1.22, replace_fuse:0.27, open_curtains:0.23, toggle_switch:0.20, close_curtains:0.13"
+  ],
+  "memory_counts": {
+    "transitions": 951,
+    "concepts": 124,
+    "thoughts": 3065,
+    "chat_messages": 1866,
+    "experiments": 18,
+    "plans": 0,
+    "semantic_frames": 1858
+  },
+  "last_prompt": "What are you thinking right now?",
+  "last_response": "bout language. I extracted values [importance:0.55]. I am storing meaning, not just text; confidence=0.27. Current learning priority: to search for hidden conditions in close curtains affecting room bright. chat: I recorded that as goal about language. I extracted goals [language_understanding='increase']. I am storing meaning, not just text; confidence=0.36. Current learning priority: to search for hidden conditions in close curtains affecting room bright. chat: I can parse the shape of that as question/learning, but my confidence is only 0.28. I need grounding for learn, should, terms, unknown. Say it as a claim, goal, correction, or cause/effect relation and I will store the meaning. My current learning pressure is to search for hidden conditions in close curtains affecting room bright.",
+  "transcript": "C:\\Users\\henry\\OneDrive\\Desktop\\New folder\\training_logs\\darwin_training_20260422_104604.txt",
+  "final_report": "C:\\Users\\henry\\OneDrive\\Desktop\\New folder\\training_logs\\darwin_training_20260422_104604_final.json",
+  "updated_at": "2026-04-22T11:46:10"
+}

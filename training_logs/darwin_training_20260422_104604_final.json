@@ -1,0 +1,48 @@
+{
+  "status": "completed",
+  "started_at": "2026-04-22T10:46:04",
+  "completed_at": "2026-04-22T11:46:10",
+  "cycles": 685,
+  "semantic_summary": "semantic_frames=1854 top_topic=language top_act=question top_value=importance top_unknown=confidence",
+  "self_report": [
+    "observations=949",
+    "known_actions=7",
+    "known_variables=17",
+    "strongest_belief=if always: chat_with_user->conversation_active None -> True conf=1.00",
+    "weakest_area=close_curtains:room_bright",
+    "learning_priority=find hidden conditions for close_curtains:room_bright",
+    "competence=chat_with_user:1.22, replace_fuse:0.27, open_curtains:0.23, toggle_switch:0.20, close_curtains:0.13"
+  ],
+  "memory_counts": {
+    "transitions": 951,
+    "concepts": 124,
+    "thoughts": 3065,
+    "chat_messages": 1866,
+    "experiments": 18,
+    "plans": 0,
+    "semantic_frames": 1858
+  },
+  "post_questions": [
+    {
+      "prompt": "what did you understand?",
+      "response": "I interpreted that as act=question, topic=language, intent=question, confidence=0.32. Groundings: variable:language_understanding. Propositions: no explicit propositions. Goals: no direct goals. Unknown terms I may need to learn: none. Semantic memory now says: semantic_frames=1845 top_topic=language top_act=question top_value=importance top_unknown=confidence."
+    },
+    {
+      "prompt": "What are the most important goals and values you learned?",
+      "response": "I recorded that as question about language. I extracted values [importance:0.55]. I am storing meaning, not just text; confidence=0.27. Current learning priority: to search for hidden conditions in close curtains affecting room bright."
+    },
+    {
+      "prompt": "Explain how language should connect to meaning.",
+      "response": "I recorded that as goal about language. I extracted goals [language_understanding='increase']. I am storing meaning, not just text; confidence=0.36. Current learning priority: to search for hidden conditions in close curtains affecting room bright."
+    },
+    {
+      "prompt": "What unknown terms should you learn next?",
+      "response": "I can parse the shape of that as question/learning, but my confidence is only 0.28. I need grounding for learn, should, terms, unknown. Say it as a claim, goal, correction, or cause/effect relation and I will store the meaning."
+    },
+    {
+      "prompt": "What are you thinking right now?",
+      "response": "I parsed your question as question/self with 0.24 confidence. I am holding 948 experiences in working memory. The live thread in my head is: chat: I recorded that as question about language. I extracted values [importance:0.55]. I am storing meaning, not just text; confidence=0.27. Current learning priority: to search for hidden conditions in close curtains affecting room bright. chat: I recorded that as goal about language. I extracted goals [language_understanding='increase']. I am storing meaning, not just text; confidence=0.36. Current learning priority: to search for hidden conditions in close curtains affecting room bright. chat: I can parse the shape of that as question/learning, but my confidence is only 0.28. I need grounding for learn, should, terms, unknown. Say it as a claim, goal, correction, or cause/effect relation and I will store the meaning. My current learning pressure is to search for hidden conditions in close curtains affecting room bright."
+    }
+  ],
+  "transcript": "C:\\Users\\henry\\OneDrive\\Desktop\\New folder\\training_logs\\darwin_training_20260422_104604.txt"
+}

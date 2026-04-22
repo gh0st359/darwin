@@ -157,6 +157,32 @@ text, so Darwin can remember what was meant instead of only what was typed.
 Darwin also parses its own responses, giving it a first version of knowing what
 it said.
 
+### Cognitive response pipeline
+
+`darwin.runtime.DarwinRuntime` now routes each chat turn through a response
+cycle instead of directly selecting a canned sentence:
+
+```text
+user language
+  -> SemanticParser creates a meaning frame
+  -> ContextRetriever finds relevant semantic, causal, concept, and runtime memory
+  -> ThoughtTrace records parse, retrieval, planning, and critique steps
+  -> DiscoursePlanner decides the communicative intent and answer structure
+  -> NaturalLanguageComposer realizes the plan as original text for this state
+  -> ResponseCritic checks for leaks, ignored memory, and overconfident claims
+  -> Darwin stores the trace, plan, critique, and conversation transition
+```
+
+The CLI exposes this process with `/thoughts`, `/reason`, `/retrieved`, and
+`/critic`. Those commands can show compact internal notation. Darwin's spoken
+answers are kept separate from that debug layer and are composed in natural
+language from the current plan, retrieved memory, and uncertainty.
+
+The speech layer still contains grammar and wording machinery because a
+non-LLM system needs a surface realizer. It does not contain prompt-to-reply
+tables. The generated answer depends on the parsed meaning, memory retrieved at
+that moment, confidence, self-model state, and response critique.
+
 ### Worlds and embodiment
 
 `darwin.embodiment` contains adapters for the current room simulation and
@@ -188,5 +214,6 @@ input/output layer around Darwin, not Darwin itself.
 6. Add self-modification boundaries: Darwin can propose model updates, run
    regression tests against them, and adopt only updates that improve measured
    world performance.
-7. Add a language shell as an interface, while keeping the causal kernel as the
-   center of cognition.
+7. Expand the response pipeline with richer grammar, analogy, causal
+   explanation, and multi-turn concept repair while keeping the causal kernel as
+   the center of cognition.
