@@ -70,6 +70,24 @@ class ResponseCritic:
             issues.append("response too thin")
             revisions.append("include a grounded point or evidence")
 
+        for level in plan.uncertainty_levels:
+            if level.level >= 0.55 and not any(
+                marker in lower
+                for marker in ("uncertain", "limited", "not yet", "tentative", "thin", "weak", "may be")
+            ):
+                issues.append(f"high uncertainty about {level.target} not disclosed")
+                revisions.append(f"surface uncertainty about {level.target}")
+                break
+
+        for claim in plan.causal_claims[:2]:
+            if claim.confidence >= 0.7 and plan.mode in {"belief_answer", "answer"}:
+                if claim.action not in lower and claim.variable not in lower:
+                    issues.append(
+                        f"high-confidence causal claim {claim.action}->{claim.variable} missing"
+                    )
+                    revisions.append("ground the answer in the strongest causal claim")
+                    break
+
         return Critique(passed=not issues, issues=issues, revisions=revisions)
 
     def revise(self, plan: ResponsePlan, critique: Critique, frame: SemanticFrame, packet: RetrievalPacket) -> ResponsePlan:

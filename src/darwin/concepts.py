@@ -155,6 +155,47 @@ class ConceptIndex:
         concepts.sort(key=lambda concept: (concept.salience, concept.support), reverse=True)
         return concepts[:limit]
 
+    def consolidate(self) -> dict[str, Any]:
+        """Memory-consolidation pass.
+
+        Forms cluster-of-affordance higher-order concepts from frequently
+        co-occurring strategies and decays the support of very stale,
+        low-salience concepts. Returns a summary of what was merged or
+        decayed so background loops can report on it.
+        """
+
+        clusters: dict[str, list[Concept]] = defaultdict(list)
+        for concept in self._concepts.values():
+            if concept.kind == "affordance" and concept.parents:
+                for parent in concept.parents:
+                    clusters[parent].append(concept)
+
+        merges: list[str] = []
+        for parent, children in clusters.items():
+            if len(children) < 2:
+                continue
+            children.sort(key=lambda concept: concept.salience, reverse=True)
+            cluster_name = f"cluster:via:{parent}"
+            cluster = self._concepts.get(cluster_name)
+            if cluster is None:
+                cluster = Concept(name=cluster_name, kind="cluster", level=5)
+                self._concepts[cluster_name] = cluster
+            for child in children[:5]:
+                cluster.parents.add(child.name)
+                cluster.support += 1
+                cluster.reward_total += child.reward_mean
+            merges.append(cluster_name)
+
+        decayed: list[str] = []
+        for name, concept in list(self._concepts.items()):
+            if concept.support <= 1 and concept.level <= 1 and concept.salience < 0.5:
+                # Soft decay: shrink support so it can naturally fade
+                concept.reward_total *= 0.9
+                if concept.salience < 0.1:
+                    decayed.append(name)
+
+        return {"clusters_formed": merges, "concepts_decayed": decayed}
+
     def by_kind(self) -> dict[str, list[Concept]]:
         groups: dict[str, list[Concept]] = defaultdict(list)
         for concept in self._concepts.values():

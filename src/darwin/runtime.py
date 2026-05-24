@@ -225,6 +225,14 @@ class DarwinRuntime:
             if not chains:
                 return None
             best = chains[0]
+            # Highest-uncertainty single step inside the simulated chain becomes
+            # a learning signal: it's escalated to the experiment loop next time
+            # by registering it in the prediction-failure counter the SelfModel
+            # uses to drive learning_priority.
+            worst_node = max(best.nodes, key=lambda node: node.uncertainty, default=None)
+            if worst_node is not None and worst_node.uncertainty >= 0.5:
+                key = f"{worst_node.action}:simulation_uncertainty"
+                self.darwin.self_model.prediction_failures[key] += 1
             self.last_simulation = best.to_record()
             content = (
                 f"Mental simulation: {best.describe()} "
@@ -241,6 +249,7 @@ class DarwinRuntime:
     def _loop_dream(self) -> RuntimeEvent | None:
         with self._lock:
             reflection = self.darwin.reflect()
+            consolidation = self.darwin.memory.concepts.consolidate()
             concepts = self.darwin.memory.concepts.salient(limit=5)
             concept_records = [concept.to_record() for concept in concepts]
             episodes_count = len(self.darwin.memory.episodes)
@@ -250,9 +259,16 @@ class DarwinRuntime:
                 "concepts": concept_records,
                 "episodes": episodes_count,
                 "unknown_terms": top_unknown,
+                "clusters_formed": consolidation.get("clusters_formed", []),
+                "concepts_decayed": consolidation.get("concepts_decayed", []),
             }
             concept_line = ", ".join(concept.name for concept in concepts) or "no concepts yet"
-            content = f"Dreaming. {reflection} Salient concepts: {concept_line}."
+            cluster_note = (
+                f" Formed {len(consolidation['clusters_formed'])} concept clusters."
+                if consolidation.get("clusters_formed")
+                else ""
+            )
+            content = f"Dreaming. {reflection} Salient concepts: {concept_line}.{cluster_note}"
             return self._event(
                 "dream",
                 content,

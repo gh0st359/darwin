@@ -9,6 +9,7 @@ from darwin.dlm import GemmaDLM, StubDLM, gemma_dlm_available
 from darwin.embodiment import RoomSimulationAdapter
 from darwin.instrumentation import StructuredLogger
 from darwin.runtime import DarwinRuntime, ensure_chat_action
+from darwin.server import DEFAULT_HOST, DEFAULT_PORT, DarwinClient, DarwinDaemon
 from darwin.streaming import StreamingSpeaker
 from darwin.storage import PersistentStore
 from darwin.training_data import TrainingDataCollector
@@ -47,6 +48,40 @@ def main(argv: list[str] | None = None) -> int:
     )
     live_parser.add_argument("--dlm-model", default="gemma3:270m")
 
+    brain_parser = subparsers.add_parser(
+        "brain",
+        help="Run Darwin as a 24/7 brain daemon. Chat clients attach via 'darwin connect'.",
+    )
+    brain_parser.add_argument("--seed", type=int, default=7)
+    brain_parser.add_argument("--exploration", type=float, default=0.20)
+    brain_parser.add_argument("--memory", type=Path, default=Path("darwin_memory.sqlite3"))
+    brain_parser.add_argument("--interval", type=float, default=3.0)
+    brain_parser.add_argument("--host", default=DEFAULT_HOST)
+    brain_parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    brain_parser.add_argument(
+        "--dlm", choices=["stub", "gemma"], default="stub",
+    )
+    brain_parser.add_argument(
+        "--dlm-backend", choices=["ollama", "llama-cpp", "transformers"], default="ollama",
+    )
+    brain_parser.add_argument("--dlm-model", default="gemma3:270m")
+    brain_parser.add_argument("--quiet", action="store_true", help="Suppress local event printing.")
+
+    connect_parser = subparsers.add_parser(
+        "connect",
+        help="Open a chat REPL connected to a running 'darwin brain' daemon.",
+    )
+    connect_parser.add_argument("--host", default=DEFAULT_HOST)
+    connect_parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    connect_parser.add_argument(
+        "--no-stream", action="store_true",
+        help="Do not print background brain events as they arrive.",
+    )
+    connect_parser.add_argument(
+        "--text-delay", type=float, default=0.0,
+        help="Optional per-word delay when printing responses (0 = instant).",
+    )
+
     export_parser = subparsers.add_parser(
         "export-training",
         help="Export accepted (plan -> rendering) pairs for DLM fine-tuning.",
@@ -81,6 +116,26 @@ def main(argv: list[str] | None = None) -> int:
             args.dlm_backend,
             args.dlm_model,
         )
+    if args.command == "brain":
+        return brain(
+            args.seed,
+            args.exploration,
+            args.memory,
+            args.interval,
+            args.host,
+            args.port,
+            args.dlm,
+            args.dlm_backend,
+            args.dlm_model,
+            not args.quiet,
+        )
+    if args.command == "connect":
+        return connect(
+            args.host,
+            args.port,
+            not args.no_stream,
+            args.text_delay,
+        )
     if args.command == "export-training":
         return export_training(args.source, args.destination, args.min_quality, args.renderer)
     return 1
@@ -92,6 +147,177 @@ def export_training(source: Path, destination: Path, min_quality: float, rendere
     count = collector.export(destination, min_quality=min_quality, renderer=renderer)
     print(f"exported {count} (plan, rendering) pairs to {destination}")
     return 0
+
+
+def brain(
+    seed: int,
+    exploration: float,
+    memory_path: Path,
+    interval: float,
+    host: str,
+    port: int,
+    dlm_choice: str,
+    dlm_backend: str,
+    dlm_model: str,
+    print_events: bool,
+) -> int:
+    """Run Darwin as a 24/7 daemon. No stdin loop; clients attach over TCP."""
+
+    world = AdaptiveRoomWorld(seed=seed)
+    adapter = RoomSimulationAdapter(world)
+    store = PersistentStore(memory_path)
+    actions = ensure_chat_action(adapter.possible_actions())
+    goal = Goal(
+        desired={"room_bright": True, "fuse_intact": True},
+        weights={"room_bright": 2.0, "fuse_intact": 1.0},
+        exploration_weight=0.35,
+    )
+    darwin = Darwin.from_store(
+        actions=actions, store=store, seed=seed, exploration_rate=exploration,
+    )
+    if dlm_choice == "gemma":
+        if not gemma_dlm_available():
+            print("warning: gemma backend requested but no local model detected; DLM will fall back when unreachable.")
+        dlm = GemmaDLM(backend=dlm_backend, model=dlm_model)
+    else:
+        dlm = StubDLM()
+
+    print_lock = threading.RLock()
+
+    def local_sink(event) -> None:
+        if not print_events:
+            return
+        if event.kind == "chat":
+            return
+        with print_lock:
+            label = event.loop if event.loop and event.loop != "main" else event.kind
+            print(f"[{label}] {event.content}", flush=True)
+
+    runtime = DarwinRuntime(
+        darwin=darwin,
+        adapter=adapter,
+        goal=goal,
+        store=store,
+        interval=interval,
+        event_sink=local_sink,
+        logger=StructuredLogger(),
+        dlm=dlm,
+        training_collector=TrainingDataCollector(),
+    )
+    daemon = DarwinDaemon(runtime, host=host, port=port)
+
+    print("Project Darwin brain")
+    print(f"memory={memory_path}")
+    print(f"dlm={dlm.name}")
+    print(f"listening on {host}:{port}")
+    print(f"background loops: {', '.join(runtime.loop_intervals)}")
+    print("Attach a client with: darwin connect")
+    print("Press Ctrl-C to stop.")
+    daemon.serve_forever()
+    print("brain stopped.")
+    return 0
+
+
+def connect(host: str, port: int, stream_events: bool, text_delay: float) -> int:
+    """Open a chat REPL attached to a running 'darwin brain' daemon."""
+
+    print_lock = threading.RLock()
+    speaker = StreamingSpeaker(enabled=text_delay > 0.0, delay=text_delay)
+
+    def on_event(message: dict) -> None:
+        if not stream_events:
+            return
+        message_type = message.get("type")
+        if message_type == "welcome":
+            with print_lock:
+                loops = ", ".join(message.get("loops", []))
+                print(f"[brain] connected. loops: {loops}")
+            return
+        if message_type != "event":
+            return
+        if message.get("kind") == "chat":
+            return
+        loop_name = message.get("loop") or message.get("kind", "event")
+        content = message.get("content", "")
+        with print_lock:
+            print(f"\n[{loop_name}] {content}")
+            print("you> ", end="", flush=True)
+
+    client = DarwinClient(host=host, port=port)
+    try:
+        client.connect(on_event)
+    except OSError as exc:
+        print(f"could not connect to brain at {host}:{port}: {exc}")
+        print("Did you start it with 'darwin brain' first?")
+        return 1
+
+    print(f"Connected to brain at {host}:{port}")
+    print("Type your messages, or /help for commands. /exit to leave the chat (brain keeps running).")
+
+    try:
+        while True:
+            try:
+                line = input("you> ").strip()
+            except EOFError:
+                print()
+                break
+            if not line:
+                continue
+            if line in {"/exit", "/quit"}:
+                break
+            if line == "/help":
+                _print_remote_help()
+                continue
+            if line == "/shutdown-brain":
+                ack = client.shutdown_brain()
+                print(ack)
+                break
+            if line.startswith("/"):
+                lines = client.command(line)
+                with print_lock:
+                    for response_line in lines:
+                        print(response_line)
+                continue
+            try:
+                result = client.chat(line)
+            except Exception as exc:
+                print(f"chat error: {exc}")
+                continue
+            with print_lock:
+                speaker.write(result.get("text", ""))
+    finally:
+        client.close()
+    return 0
+
+
+def _print_remote_help() -> None:
+    print(
+        "\n".join(
+            [
+                "Chat: type anything (no leading slash) to talk to Darwin.",
+                "/status        show Darwin's self-model",
+                "/beliefs       show strongest causal beliefs",
+                "/concepts      show concept hierarchy",
+                "/experiments   show active experiment proposals",
+                "/think         run one cognition cycle now",
+                "/dream         consolidate memory and concepts",
+                "/simulate      run one mental simulation now",
+                "/selfmod       propose+test self-modifications now",
+                "/uncertainty   show current per-action uncertainty scan",
+                "/loops         show background loop status",
+                "/causal-graph  show distilled action->variable graph",
+                "/dlm           show DLM info and last render result",
+                "/training      show training-data corpus summary",
+                "/metrics       show structured-logger metrics snapshot",
+                "/thoughts      show last internal thought trace",
+                "/retrieved     show memories used for last response",
+                "/critic        show self-critique of last response",
+                "/trace         show recent runtime events",
+                "/exit          disconnect (brain keeps running)",
+                "/shutdown-brain  stop the brain daemon and disconnect",
+            ]
+        )
+    )
 
 
 def run_room(steps: int, seed: int, exploration: float) -> int:

@@ -17,7 +17,9 @@ class NaturalLanguageComposer:
         if opener:
             sections.append(opener)
         sections.extend(self._body_sentences(plan))
+        sections.extend(self._causal_sentences(plan))
         sections.extend(self._uncertainty_sentences(plan))
+        sections.extend(self._reference_sentences(plan))
         sections.extend(self._next_step_sentences(plan))
         if plan.clarification_questions:
             sections.append(plan.clarification_questions[0])
@@ -85,12 +87,44 @@ class NaturalLanguageComposer:
         return sentences
 
     def _uncertainty_sentences(self, plan: ResponsePlan) -> list[str]:
+        sentences: list[str] = []
+        for level in plan.uncertainty_levels[:3]:
+            if level.level < 0.4:
+                continue
+            target = level.target.replace("_", " ")
+            sentences.append(
+                f"I am uncertain about {target} at level {level.level:.2f}"
+                + (f" because {level.reason}." if level.reason else ".")
+            )
         uncertainties = [item for item in plan.uncertainties if item]
-        if not uncertainties and plan.confidence >= 0.45:
-            return []
         if uncertainties:
-            return [f"My uncertainty is {', '.join(uncertainties[:3])}."]
-        return [f"My confidence is limited at {plan.confidence:.2f}, so I should not overstate this."]
+            sentences.append(f"My uncertainty is {', '.join(uncertainties[:3])}.")
+        if not sentences and plan.confidence < 0.45:
+            sentences.append(
+                f"My confidence is limited at {plan.confidence:.2f}, so I should not overstate this."
+            )
+        return sentences
+
+    def _causal_sentences(self, plan: ResponsePlan) -> list[str]:
+        sentences: list[str] = []
+        for claim in plan.causal_claims[:2]:
+            if claim.confidence < 0.55:
+                continue
+            condition = "" if claim.condition == "always" else f" when {claim.condition},"
+            sentences.append(
+                f"From experience,{condition} {claim.action} tends to make "
+                f"{claim.variable} {claim.effect} (confidence {claim.confidence:.2f}, "
+                f"n={claim.samples})."
+            )
+        return sentences
+
+    def _reference_sentences(self, plan: ResponsePlan) -> list[str]:
+        if not plan.referenced_experiences:
+            return []
+        top = plan.referenced_experiences[0]
+        if top.score < 0.35:
+            return []
+        return [f"I am grounding this in {top.kind.replace('_', ' ')}: {top.summary}."]
 
     def _next_step_sentences(self, plan: ResponsePlan) -> list[str]:
         actions = [item for item in plan.next_actions if item]
