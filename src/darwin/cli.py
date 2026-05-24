@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import threading
 from pathlib import Path
 
@@ -69,13 +70,15 @@ def main(argv: list[str] | None = None) -> int:
 
     connect_parser = subparsers.add_parser(
         "connect",
-        help="Open a chat REPL connected to a running 'darwin brain' daemon.",
+        help="Open a clean chat REPL connected to a running 'darwin brain' daemon.",
     )
     connect_parser.add_argument("--host", default=DEFAULT_HOST)
     connect_parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     connect_parser.add_argument(
-        "--no-stream", action="store_true",
-        help="Do not print background brain events as they arrive.",
+        "--watch-events", action="store_true",
+        help="Mirror the brain's background events into this chat window. "
+             "Off by default — keep this terminal a clean conversation and watch "
+             "the brain's thinking in the 'darwin brain' terminal instead.",
     )
     connect_parser.add_argument(
         "--text-delay", type=float, default=0.0,
@@ -133,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
         return connect(
             args.host,
             args.port,
-            not args.no_stream,
+            args.watch_events,
             args.text_delay,
         )
     if args.command == "export-training":
@@ -218,20 +221,29 @@ def brain(
     return 0
 
 
-def connect(host: str, port: int, stream_events: bool, text_delay: float) -> int:
-    """Open a chat REPL attached to a running 'darwin brain' daemon."""
+def connect(host: str, port: int, watch_events: bool, text_delay: float) -> int:
+    """Open a clean chat REPL attached to a running 'darwin brain' daemon.
+
+    By default the chat window stays a clean conversation: only the user's
+    'you>' prompt and Darwin's 'darwin>' response are shown. The brain's
+    24/7 background thinking is still happening — it just streams in the
+    'darwin brain' terminal where it belongs. Pass --watch-events to also
+    mirror those events into the chat window.
+    """
 
     print_lock = threading.RLock()
     speaker = StreamingSpeaker(enabled=text_delay > 0.0, delay=text_delay)
+    welcomed = threading.Event()
 
     def on_event(message: dict) -> None:
-        if not stream_events:
-            return
         message_type = message.get("type")
-        if message_type == "welcome":
+        if message_type == "welcome" and not welcomed.is_set():
+            welcomed.set()
             with print_lock:
                 loops = ", ".join(message.get("loops", []))
-                print(f"[brain] connected. loops: {loops}")
+                print(f"[brain] connected. background loops running: {loops}")
+            return
+        if not watch_events:
             return
         if message_type != "event":
             return
@@ -240,8 +252,11 @@ def connect(host: str, port: int, stream_events: bool, text_delay: float) -> int
         loop_name = message.get("loop") or message.get("kind", "event")
         content = message.get("content", "")
         with print_lock:
-            print(f"\n[{loop_name}] {content}")
-            print("you> ", end="", flush=True)
+            # Erase the current 'you> ...' line, print the event, redraw prompt
+            sys.stdout.write("\r\x1b[2K")
+            print(f"[{loop_name}] {content}")
+            sys.stdout.write("you> ")
+            sys.stdout.flush()
 
     client = DarwinClient(host=host, port=port)
     try:
@@ -252,6 +267,10 @@ def connect(host: str, port: int, stream_events: bool, text_delay: float) -> int
         return 1
 
     print(f"Connected to brain at {host}:{port}")
+    if watch_events:
+        print("Watching background events (--watch-events). Use this terminal to chat too.")
+    else:
+        print("This is your clean chat window. The brain's live thinking streams in the 'darwin brain' terminal.")
     print("Type your messages, or /help for commands. /exit to leave the chat (brain keeps running).")
 
     try:
@@ -270,10 +289,16 @@ def connect(host: str, port: int, stream_events: bool, text_delay: float) -> int
                 continue
             if line == "/shutdown-brain":
                 ack = client.shutdown_brain()
-                print(ack)
+                with print_lock:
+                    print(f"darwin> {ack}")
                 break
             if line.startswith("/"):
-                lines = client.command(line)
+                try:
+                    lines = client.command(line)
+                except Exception as exc:
+                    with print_lock:
+                        print(f"darwin> command error: {exc}")
+                    continue
                 with print_lock:
                     for response_line in lines:
                         print(response_line)
@@ -281,10 +306,16 @@ def connect(host: str, port: int, stream_events: bool, text_delay: float) -> int
             try:
                 result = client.chat(line)
             except Exception as exc:
-                print(f"chat error: {exc}")
+                with print_lock:
+                    print(f"darwin> chat error: {exc}")
                 continue
             with print_lock:
-                speaker.write(result.get("text", ""))
+                if speaker.enabled:
+                    sys.stdout.write("darwin> ")
+                    sys.stdout.flush()
+                    speaker.write(result.get("text", ""))
+                else:
+                    print(f"darwin> {result.get('text', '')}")
     finally:
         client.close()
     return 0
