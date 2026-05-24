@@ -29,6 +29,18 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9870
 
 
+class PortInUseError(RuntimeError):
+    """Raised when the brain cannot bind to its configured port."""
+
+
+class _ReusableTCPServer(socketserver.ThreadingTCPServer):
+    """ThreadingTCPServer that allows TIME_WAIT reuse without mutating
+    the base class globally."""
+
+    allow_reuse_address = True
+    daemon_threads = True
+
+
 def _serialize(payload: Any) -> str:
     def _default(value: Any) -> Any:
         if isinstance(value, set):
@@ -91,10 +103,25 @@ class DarwinDaemon:
         if self.running:
             return
         self._stop.clear()
-        self.runtime.start()
+        # Bind the listening socket FIRST, before we start the cognitive
+        # loops. If the port is already taken we want a clean error,
+        # not a half-running brain with no way to shut down.
         handler = self._make_handler()
-        socketserver.ThreadingTCPServer.allow_reuse_address = True
-        self._server = socketserver.ThreadingTCPServer((self.host, self.port), handler)
+        try:
+            self._server = _ReusableTCPServer((self.host, self.port), handler)
+        except OSError as exc:
+            # Restore class state, reset stop event so a retry can work.
+            self._server = None
+            self._stop.set()
+            raise PortInUseError(
+                f"Cannot bind {self.host}:{self.port} ({exc}). "
+                f"Another 'darwin brain' is probably already running. "
+                f"Stop it (lsof -ti:{self.port} | xargs kill) or pick "
+                f"a different port (--port N)."
+            ) from exc
+        # Socket is bound; now safe to spin up background cognition and
+        # the request-serving thread.
+        self.runtime.start()
         thread = threading.Thread(
             target=self._server.serve_forever,
             name="darwin-server",

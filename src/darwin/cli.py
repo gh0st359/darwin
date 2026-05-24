@@ -10,7 +10,7 @@ from darwin.dlm import GemmaDLM, StubDLM, gemma_dlm_available
 from darwin.embodiment import RoomSimulationAdapter
 from darwin.instrumentation import StructuredLogger
 from darwin.runtime import DarwinRuntime, ensure_chat_action
-from darwin.server import DEFAULT_HOST, DEFAULT_PORT, DarwinClient, DarwinDaemon
+from darwin.server import DEFAULT_HOST, DEFAULT_PORT, DarwinClient, DarwinDaemon, PortInUseError
 from darwin.streaming import StreamingSpeaker
 from darwin.storage import PersistentStore
 from darwin.training_data import TrainingDataCollector
@@ -216,7 +216,11 @@ def brain(
     print(f"background loops: {', '.join(runtime.loop_intervals)}")
     print("Attach a client with: darwin connect")
     print("Press Ctrl-C to stop.")
-    daemon.serve_forever()
+    try:
+        daemon.serve_forever()
+    except PortInUseError as exc:
+        print(f"\nerror: {exc}", flush=True)
+        return 2
     print("brain stopped.")
     return 0
 

@@ -12,7 +12,7 @@ from pathlib import Path
 from darwin.agent import Darwin
 from darwin.embodiment import RoomSimulationAdapter
 from darwin.runtime import DarwinRuntime, ensure_chat_action
-from darwin.server import DarwinClient, DarwinDaemon
+from darwin.server import DarwinClient, DarwinDaemon, PortInUseError
 from darwin.storage import PersistentStore
 from darwin.training_data import TrainingDataCollector
 from darwin.instrumentation import StructuredLogger
@@ -182,6 +182,25 @@ class BrainDaemonTests(unittest.TestCase):
                 self.assertEqual(event_messages, [])
             finally:
                 daemon.stop()
+
+    def test_port_collision_raises_friendly_error(self) -> None:
+        """A second brain on the same port must fail with PortInUseError
+        and must not have started its background cognition loops."""
+
+        with tempfile.TemporaryDirectory() as directory:
+            port = _free_port()
+            first = _build_daemon(Path(directory), port)
+            first.start()
+            try:
+                second = _build_daemon(Path(directory) / "second", port)
+                with self.assertRaises(PortInUseError):
+                    second.start()
+                # The second daemon must NOT have started its runtime
+                # (because we bind the socket first; if bind fails, the
+                # cognitive loops never spin up).
+                self.assertFalse(second.runtime.running)
+            finally:
+                first.stop()
 
     def test_two_clients_share_one_brain(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
