@@ -131,6 +131,8 @@ class BrainDaemonTests(unittest.TestCase):
                 else:
                     self.fail("could not connect to daemon")
 
+                # Explicit opt-in: clients no longer auto-receive the firehose
+                client.subscribe_events(timeout=2.0)
                 # Wait long enough for background loops to fire
                 time.sleep(1.5)
                 client.close()
@@ -140,6 +142,44 @@ class BrainDaemonTests(unittest.TestCase):
                 # Daemon should have streamed at least a few background events
                 self.assertTrue(received)
                 self.assertTrue(event_kinds & {"simulation", "experiment", "dream", "uncertainty", "self_modification", "reflection"})
+            finally:
+                daemon.stop()
+
+    def test_unsubscribed_client_receives_no_events(self) -> None:
+        """Default chat client must not receive the background firehose."""
+
+        with tempfile.TemporaryDirectory() as directory:
+            port = _free_port()
+            daemon = _build_daemon(Path(directory), port)
+            daemon.start()
+            try:
+                client = DarwinClient(host="127.0.0.1", port=port)
+                received: list[dict] = []
+                lock = threading.Lock()
+
+                def collector(message: dict) -> None:
+                    with lock:
+                        received.append(message)
+
+                deadline = time.time() + 2.0
+                while time.time() < deadline:
+                    try:
+                        client.connect(collector)
+                        break
+                    except OSError:
+                        time.sleep(0.05)
+                else:
+                    self.fail("could not connect to daemon")
+
+                # NOTE: do NOT call subscribe_events. The chat REPL relies on
+                # this exact silence. Background loops fire at <0.5s intervals
+                # so 1.5s gives them many chances to leak.
+                time.sleep(1.5)
+                client.close()
+
+                with lock:
+                    event_messages = [m for m in received if m.get("type") == "event"]
+                self.assertEqual(event_messages, [])
             finally:
                 daemon.stop()
 

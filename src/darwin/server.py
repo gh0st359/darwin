@@ -48,6 +48,7 @@ class Subscriber:
     out_queue: "queue.Queue[str]" = field(default_factory=lambda: queue.Queue(maxsize=512))
     alive: threading.Event = field(default_factory=threading.Event)
     address: str = ""
+    wants_events: bool = False
 
     def send(self, payload: dict[str, Any]) -> None:
         if not self.alive.is_set():
@@ -149,7 +150,8 @@ class DarwinDaemon:
         }
         with self._subscribers_lock:
             for subscriber in list(self._subscribers):
-                subscriber.send(payload)
+                if subscriber.wants_events:
+                    subscriber.send(payload)
 
     # -- per-connection handler ----------------------------------------
 
@@ -254,6 +256,12 @@ class DarwinDaemon:
             elif cmd == "command":
                 lines = self._handle_named_command(str(message.get("command", "")))
                 subscriber.send({"type": "command_result", "id": request_id, "lines": lines})
+            elif cmd == "subscribe":
+                subscriber.wants_events = True
+                subscriber.send({"type": "subscribed", "id": request_id})
+            elif cmd == "unsubscribe":
+                subscriber.wants_events = False
+                subscriber.send({"type": "unsubscribed", "id": request_id})
             elif cmd == "shutdown":
                 subscriber.send({"type": "shutting_down", "id": request_id})
                 threading.Thread(target=self.stop, daemon=True).start()
@@ -459,6 +467,14 @@ class DarwinClient:
 
     def shutdown_brain(self, timeout: float = 5.0) -> dict[str, Any]:
         return self._request({"cmd": "shutdown"}, timeout=timeout)
+
+    def subscribe_events(self, timeout: float = 5.0) -> dict[str, Any]:
+        """Opt in to receive brain background events on this connection."""
+
+        return self._request({"cmd": "subscribe"}, timeout=timeout)
+
+    def unsubscribe_events(self, timeout: float = 5.0) -> dict[str, Any]:
+        return self._request({"cmd": "unsubscribe"}, timeout=timeout)
 
     # -- internal -------------------------------------------------------
 

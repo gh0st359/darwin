@@ -224,35 +224,30 @@ def brain(
 def connect(host: str, port: int, watch_events: bool, text_delay: float) -> int:
     """Open a clean chat REPL attached to a running 'darwin brain' daemon.
 
-    By default the chat window stays a clean conversation: only the user's
-    'you>' prompt and Darwin's 'darwin>' response are shown. The brain's
-    24/7 background thinking is still happening — it just streams in the
-    'darwin brain' terminal where it belongs. Pass --watch-events to also
-    mirror those events into the chat window.
+    By default the chat window is a clean conversation: only 'you>' for
+    your input and 'darwin>' for Darwin's response. The chat client does
+    not even subscribe to the brain's event firehose — those background
+    thoughts still happen, they just stream in the 'darwin brain'
+    terminal where they belong. Pass --watch-events to mirror them here.
     """
 
     print_lock = threading.RLock()
     speaker = StreamingSpeaker(enabled=text_delay > 0.0, delay=text_delay)
-    welcomed = threading.Event()
 
     def on_event(message: dict) -> None:
-        message_type = message.get("type")
-        if message_type == "welcome" and not welcomed.is_set():
-            welcomed.set()
-            with print_lock:
-                loops = ", ".join(message.get("loops", []))
-                print(f"[brain] connected. background loops running: {loops}")
-            return
+        # Without --watch-events, the chat window is silent. Even the
+        # 'welcome' frame is suppressed here so it cannot collide with
+        # the 'you>' prompt. The connection-confirmation line is printed
+        # synchronously in the main thread below, before the REPL starts.
         if not watch_events:
             return
-        if message_type != "event":
+        if message.get("type") != "event":
             return
         if message.get("kind") == "chat":
             return
         loop_name = message.get("loop") or message.get("kind", "event")
         content = message.get("content", "")
         with print_lock:
-            # Erase the current 'you> ...' line, print the event, redraw prompt
             sys.stdout.write("\r\x1b[2K")
             print(f"[{loop_name}] {content}")
             sys.stdout.write("you> ")
@@ -268,9 +263,13 @@ def connect(host: str, port: int, watch_events: bool, text_delay: float) -> int:
 
     print(f"Connected to brain at {host}:{port}")
     if watch_events:
+        try:
+            client.subscribe_events()
+        except Exception as exc:
+            print(f"warning: could not subscribe to events: {exc}")
         print("Watching background events (--watch-events). Use this terminal to chat too.")
     else:
-        print("This is your clean chat window. The brain's live thinking streams in the 'darwin brain' terminal.")
+        print("Clean chat window. Background thinking streams in the 'darwin brain' terminal.")
     print("Type your messages, or /help for commands. /exit to leave the chat (brain keeps running).")
 
     try:
