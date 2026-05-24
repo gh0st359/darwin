@@ -161,6 +161,70 @@ class ContextRetriever:
                     )
                 )
 
+        episodes = darwin.memory.episodes
+        episode_list = list(episodes.all())
+        total_episodes = len(episode_list)
+        episode_scope = episode_list[-200:]
+        scope_offset = total_episodes - len(episode_scope)
+        for offset, transition in enumerate(episode_scope):
+            absolute_index = scope_offset + offset
+            recency = (absolute_index + 1) / max(1, total_episodes)
+            action_terms = self._terms(transition.action.replace("_", " "))
+            overlap = len(query_terms & action_terms)
+            grounded = 1 if transition.action in query_groundings else 0
+            for variable in dict(transition.before):
+                if variable in query_groundings:
+                    grounded += 1
+            score = 0.08 * overlap + 0.18 * grounded + 0.12 * recency + min(0.2, 0.05 * float(transition.reward))
+            if score <= 0.18:
+                continue
+            after_state = dict(transition.after)
+            changed = [
+                f"{key}={value!r}"
+                for key, value in after_state.items()
+                if dict(transition.before).get(key) != value
+            ]
+            content = (
+                f"{transition.action} (reward {float(transition.reward):.2f}) "
+                f"changed {', '.join(changed) or 'no observable variables'}"
+            )
+            items.append(
+                RetrievedMemory(
+                    kind="episode",
+                    title=f"t={transition.t} {transition.action}",
+                    content=content,
+                    score=score,
+                    payload={
+                        "t": transition.t,
+                        "action": transition.action,
+                        "before": dict(transition.before),
+                        "after": after_state,
+                        "reward": float(transition.reward),
+                        "recency": recency,
+                    },
+                )
+            )
+
+        experiment_engine = getattr(darwin, "experiment_engine", None)
+        completed = getattr(experiment_engine, "completed", []) if experiment_engine else []
+        for completed_experiment in completed[-30:]:
+            action_name = completed_experiment.proposal.action.name
+            if action_name in query_groundings or query_terms & self._terms(action_name.replace("_", " ")):
+                content = (
+                    f"experiment on {action_name}: "
+                    f"{completed_experiment.proposal.question} -> "
+                    f"{'confirmed' if completed_experiment.confirmed else 'surprised'}"
+                )
+                items.append(
+                    RetrievedMemory(
+                        kind="experiment",
+                        title=action_name,
+                        content=content,
+                        score=0.45 if completed_experiment.confirmed else 0.55,
+                        payload=completed_experiment.to_record(),
+                    )
+                )
+
         items.sort(key=lambda item: item.score, reverse=True)
         return RetrievalPacket(
             query=frame,
@@ -169,6 +233,48 @@ class ContextRetriever:
             values=dict(darwin.semantic_memory.values.most_common(12)),
             unknown_terms=dict(darwin.semantic_memory.unknown_terms.most_common(12)),
         )
+
+    def retrieve_for_topic(
+        self,
+        darwin: Any,
+        topic: str,
+        groundings: Iterable[str] = (),
+        limit: int = 8,
+    ) -> list[RetrievedMemory]:
+        """Convenience retrieval used by background loops without a SemanticFrame."""
+
+        items: list[RetrievedMemory] = []
+        grounding_set = set(groundings)
+        episodes = darwin.memory.episodes
+        for grounding in grounding_set:
+            for transition in episodes.by_variable(grounding, limit=4):
+                after = dict(transition.after)
+                items.append(
+                    RetrievedMemory(
+                        kind="episode_topic",
+                        title=f"{transition.action} touching {grounding}",
+                        content=(
+                            f"{transition.action} on {grounding} -> "
+                            f"{after.get(grounding)!r} (reward {float(transition.reward):.2f})"
+                        ),
+                        score=0.4,
+                    )
+                )
+        for belief in darwin.causal_model.beliefs(limit=20):
+            if belief.action in grounding_set or belief.variable in grounding_set or topic in belief.action:
+                items.append(
+                    RetrievedMemory(
+                        kind="causal_belief",
+                        title=f"{belief.action}->{belief.variable}",
+                        content=(
+                            f"if {belief.condition}, {belief.action} changes {belief.variable} as "
+                            f"{belief.effect} (conf {belief.confidence:.2f})"
+                        ),
+                        score=belief.confidence,
+                    )
+                )
+        items.sort(key=lambda item: item.score, reverse=True)
+        return items[:limit]
 
     def _score_frame(
         self,

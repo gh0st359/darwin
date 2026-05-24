@@ -5,10 +5,13 @@ import threading
 from pathlib import Path
 
 from darwin.agent import Darwin
+from darwin.dlm import GemmaDLM, StubDLM, gemma_dlm_available
 from darwin.embodiment import RoomSimulationAdapter
+from darwin.instrumentation import StructuredLogger
 from darwin.runtime import DarwinRuntime, ensure_chat_action
 from darwin.streaming import StreamingSpeaker
 from darwin.storage import PersistentStore
+from darwin.training_data import TrainingDataCollector
 from darwin.types import Goal
 from darwin.worlds import AdaptiveRoomWorld
 
@@ -31,6 +34,35 @@ def main(argv: list[str] | None = None) -> int:
     live_parser.add_argument("--no-stream", action="store_true")
     live_parser.add_argument("--no-text-stream", action="store_true")
     live_parser.add_argument("--text-delay", type=float, default=0.012)
+    live_parser.add_argument(
+        "--dlm",
+        choices=["stub", "gemma"],
+        default="stub",
+        help="Language renderer: 'stub' (deterministic composer) or 'gemma' (gemma-3-270m).",
+    )
+    live_parser.add_argument(
+        "--dlm-backend",
+        choices=["ollama", "llama-cpp", "transformers"],
+        default="ollama",
+    )
+    live_parser.add_argument("--dlm-model", default="gemma3:270m")
+
+    export_parser = subparsers.add_parser(
+        "export-training",
+        help="Export accepted (plan -> rendering) pairs for DLM fine-tuning.",
+    )
+    export_parser.add_argument(
+        "--source",
+        type=Path,
+        default=Path("training_logs/dlm_training_pairs.jsonl"),
+    )
+    export_parser.add_argument(
+        "--destination",
+        type=Path,
+        default=Path("training_logs/dlm_training_export.jsonl"),
+    )
+    export_parser.add_argument("--min-quality", type=float, default=0.7)
+    export_parser.add_argument("--renderer", default=None)
 
     args = parser.parse_args(argv)
     if args.command == "run":
@@ -45,8 +77,21 @@ def main(argv: list[str] | None = None) -> int:
             not args.no_stream,
             not args.no_text_stream,
             args.text_delay,
+            args.dlm,
+            args.dlm_backend,
+            args.dlm_model,
         )
+    if args.command == "export-training":
+        return export_training(args.source, args.destination, args.min_quality, args.renderer)
     return 1
+
+
+def export_training(source: Path, destination: Path, min_quality: float, renderer: str | None) -> int:
+    collector = TrainingDataCollector(path=source)
+    collector.load_existing()
+    count = collector.export(destination, min_quality=min_quality, renderer=renderer)
+    print(f"exported {count} (plan, rendering) pairs to {destination}")
+    return 0
 
 
 def run_room(steps: int, seed: int, exploration: float) -> int:
@@ -104,6 +149,9 @@ def live(
     stream: bool,
     text_stream: bool,
     text_delay: float,
+    dlm_choice: str = "stub",
+    dlm_backend: str = "ollama",
+    dlm_model: str = "gemma3:270m",
 ) -> int:
     world = AdaptiveRoomWorld(seed=seed)
     adapter = RoomSimulationAdapter(world)
@@ -123,14 +171,25 @@ def live(
     print_lock = threading.RLock()
 
     def stream_event(event) -> None:
-        if threading.current_thread().name != "darwin-runtime":
+        thread_name = threading.current_thread().name
+        if not thread_name.startswith("darwin-"):
             return
         if event.kind == "chat":
             return
         with print_lock:
-            print(f"\n[{event.kind}] {event.content}")
+            label = event.loop if event.loop and event.loop != "main" else event.kind
+            print(f"\n[{label}] {event.content}")
             print("darwin> ", end="", flush=True)
 
+    if dlm_choice == "gemma":
+        if not gemma_dlm_available():
+            print("warning: gemma backend requested but no local model detected; the DLM will fall back to the composer when it cannot reach the backend.")
+        dlm = GemmaDLM(backend=dlm_backend, model=dlm_model)
+    else:
+        dlm = StubDLM()
+
+    logger = StructuredLogger()
+    collector = TrainingDataCollector()
     runtime = DarwinRuntime(
         darwin=darwin,
         adapter=adapter,
@@ -138,16 +197,20 @@ def live(
         store=store,
         interval=interval,
         event_sink=stream_event,
+        logger=logger,
+        dlm=dlm,
+        training_collector=collector,
     )
     runtime.set_streaming(stream)
     speaker = StreamingSpeaker(enabled=text_stream, delay=text_delay)
 
     print("Project Darwin live")
     print(f"memory={memory_path}")
+    print(f"dlm={dlm.name} (backend={dlm_backend if dlm_choice == 'gemma' else 'composer'})")
     print("Type /help for commands. Type /exit to stop.")
     if background:
         runtime.start()
-        print(f"background cognition=on interval={interval:.1f}s")
+        print(f"background cognition=on (loops={', '.join(runtime.loop_intervals)})")
         print(f"thought stream={'on' if stream else 'off'}")
         print(f"text stream={'on' if speaker.enabled else 'off'}")
     else:
@@ -193,22 +256,30 @@ def _handle_command(
         print(
             "\n".join(
                 [
-                    "/status       show Darwin's self-model",
-                    "/beliefs      show strongest causal beliefs",
-                    "/concepts     show concept hierarchy",
-                    "/semantics    show recent parsed meanings",
-                    "/experiments  show active experiment proposals",
-                    "/think        run one cognition cycle now",
-                    "/dream        consolidate memory and concepts",
-                    "/run N        run N cognition cycles",
-                    "/plan         show the current multi-step plan",
-                    "/thoughts     show last internal thought trace",
-                    "/reason       show compact reasoning summary",
-                    "/retrieved    show memories used for last response",
-                    "/critic       show self-critique of last response",
-                    "/trace        show recent runtime events",
-                    "/stream       inspect or change thought/text streaming",
-                    "/exit         shut down cleanly",
+                    "/status         show Darwin's self-model",
+                    "/beliefs        show strongest causal beliefs",
+                    "/concepts       show concept hierarchy",
+                    "/semantics      show recent parsed meanings",
+                    "/experiments    show active experiment proposals",
+                    "/think          run one cognition cycle now",
+                    "/dream          consolidate memory and concepts",
+                    "/simulate       run one mental simulation now (multi-step causal chain)",
+                    "/selfmod        propose+test self-modifications now",
+                    "/uncertainty    show current per-action uncertainty scan",
+                    "/loops          show background loop status",
+                    "/causal-graph   show distilled causal action->variable graph",
+                    "/dlm            show DLM info and last render result",
+                    "/training       show training-data corpus summary",
+                    "/metrics        show structured-logger metrics snapshot",
+                    "/run N          run N cognition cycles",
+                    "/plan           show the current multi-step plan",
+                    "/thoughts       show last internal thought trace",
+                    "/reason         show compact reasoning summary",
+                    "/retrieved      show memories used for last response",
+                    "/critic         show self-critique of last response",
+                    "/trace          show recent runtime events",
+                    "/stream         inspect or change thought/text streaming",
+                    "/exit           shut down cleanly",
                 ]
             )
         )
@@ -372,6 +443,97 @@ def _handle_command(
             return True
         runtime.set_streaming(value == "on")
         print(f"thought stream={value}")
+        return True
+
+    if command == "/simulate":
+        snapshot = runtime.run_simulation()
+        if snapshot is None:
+            print("no simulation produced")
+        else:
+            print(f"chain confidence={snapshot.get('chain_confidence', 0):.3f}")
+            print(f"chain uncertainty={snapshot.get('chain_uncertainty', 0):.3f}")
+            print(f"total expected reward={snapshot.get('total_expected_reward', 0):.3f}")
+            for node in snapshot.get("nodes", [])[:6]:
+                print(f"- step {node['step']}: {node['action']} conf={node['confidence']:.2f}")
+        return True
+
+    if command == "/selfmod":
+        outcomes = runtime.run_self_modification()
+        if not outcomes:
+            print("no self-modification proposals this cycle")
+            return True
+        for outcome in outcomes:
+            mark = "accepted" if outcome.accepted else "rejected"
+            print(
+                f"- [{mark}] {outcome.proposal.kind} "
+                f"baseline={outcome.baseline_error:.4f} candidate={outcome.candidate_error:.4f} "
+                f"gain={outcome.improvement:.4f}"
+            )
+            print(f"    rationale: {outcome.proposal.rationale}")
+            if outcome.proposal.payload:
+                print(f"    payload: {outcome.proposal.payload}")
+        return True
+
+    if command == "/uncertainty":
+        scan = runtime.last_uncertainty_scan
+        if scan is None:
+            print("no uncertainty scan yet; run the runtime in the background.")
+            return True
+        for item in scan.get("scan", [])[:10]:
+            print(f"- {item['action']:>20} unc={item['uncertainty']:.2f}")
+        return True
+
+    if command == "/loops":
+        if not runtime.running:
+            print("background loops are not running")
+            return True
+        print("background loops:")
+        for name, value in runtime.loop_intervals.items():
+            state = runtime._loop_state.get(name, {})
+            print(f"- {name:<18} interval={value:.1f}s last={state.get('last_event', 'n/a')}")
+        return True
+
+    if command == "/causal-graph":
+        graph = runtime.darwin.planner.chain_engine.graph(min_confidence=0.0, limit=80)
+        print(
+            f"actions={len(graph.actions)} variables={len(graph.variables)} edges={len(graph.edges)}"
+        )
+        for edge in graph.edges[:20]:
+            print(
+                f"- {edge.source_action} -> {edge.variable} effect={edge.effect} "
+                f"conf={edge.confidence:.2f} n={edge.samples}"
+            )
+        return True
+
+    if command == "/dlm":
+        render = runtime.last_render
+        print(f"current DLM: {runtime.dlm.name}")
+        if render is None:
+            print("no DLM render has happened in this session yet.")
+            return True
+        print(f"renderer={render.renderer} valid={render.valid} duration={render.duration_ms:.1f}ms")
+        for note in render.validation_notes[:5]:
+            print(f"- note: {note}")
+        return True
+
+    if command == "/training":
+        summary = runtime.training_collector.summary()
+        print(
+            f"training pairs collected={summary['total']} accepted={summary['accepted']} path={summary['path']}"
+        )
+        for renderer, count in summary["by_renderer"].items():
+            print(f"- {renderer}: {count}")
+        return True
+
+    if command == "/metrics":
+        snapshot = runtime.logger.snapshot()
+        print("metrics:")
+        for key, value in snapshot["metrics"].items():
+            print(f"- {key}: {value}")
+        if snapshot["counters"]:
+            print("counters:")
+            for key, value in snapshot["counters"].items():
+                print(f"- {key}: {value}")
         return True
 
     print(f"Unknown command: {command}. Type /help.")

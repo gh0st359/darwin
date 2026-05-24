@@ -254,6 +254,47 @@ class PersistentStore:
             ).fetchall()
         return [loads(row["payload"]) for row in rows]
 
+    def record_self_modification(self, payload: Mapping[str, Any]) -> int:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                insert into self_modifications(proposal_id, kind, target, status, payload, created_at)
+                values (?, ?, ?, ?, ?, current_timestamp)
+                """,
+                (
+                    str(payload.get("proposal_id", "")),
+                    str(payload.get("kind", "")),
+                    str(payload.get("target", "")),
+                    str(payload.get("status", "proposed")),
+                    dumps(dict(payload)),
+                ),
+            )
+            connection.commit()
+            return int(cursor.lastrowid)
+
+    def recent_self_modifications(self, limit: int = 20) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                select proposal_id, kind, target, status, payload, created_at
+                from self_modifications
+                order by id desc
+                limit ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [
+            {
+                "proposal_id": row["proposal_id"],
+                "kind": row["kind"],
+                "target": row["target"],
+                "status": row["status"],
+                "payload": loads(row["payload"]),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
     def counts(self) -> dict[str, int]:
         tables = [
             "transitions",
@@ -263,6 +304,7 @@ class PersistentStore:
             "experiments",
             "plans",
             "semantic_frames",
+            "self_modifications",
         ]
         with self._connect() as connection:
             return {
@@ -349,6 +391,16 @@ class PersistentStore:
                     confidence real not null,
                     uncertainty real not null,
                     original_text text not null,
+                    payload text not null,
+                    created_at text not null
+                );
+
+                create table if not exists self_modifications (
+                    id integer primary key autoincrement,
+                    proposal_id text not null,
+                    kind text not null,
+                    target text not null,
+                    status text not null,
                     payload text not null,
                     created_at text not null
                 );

@@ -1,11 +1,66 @@
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
 from darwin.experiments import ExperimentProposal
 from darwin.retrieval import RetrievalPacket, RetrievedMemory
 from darwin.semantics import SemanticFrame
+
+
+@dataclass
+class CausalClaim:
+    """A single causal assertion that the renderer must preserve verbatim."""
+
+    action: str
+    variable: str
+    effect: str
+    confidence: float
+    samples: int
+    condition: str = "always"
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "action": self.action,
+            "variable": self.variable,
+            "effect": self.effect,
+            "confidence": self.confidence,
+            "samples": self.samples,
+            "condition": self.condition,
+        }
+
+
+@dataclass
+class ReferencedExperience:
+    """A memory the response is grounded in."""
+
+    kind: str
+    title: str
+    summary: str
+    score: float
+    timestamp: float | None = None
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "title": self.title,
+            "summary": self.summary,
+            "score": self.score,
+            "timestamp": self.timestamp,
+        }
+
+
+@dataclass
+class UncertaintyLevel:
+    """An explicit uncertainty marker. The renderer MUST surface this."""
+
+    target: str
+    level: float
+    reason: str = ""
+
+    def to_record(self) -> dict[str, Any]:
+        return {"target": self.target, "level": self.level, "reason": self.reason}
 
 
 @dataclass
@@ -21,9 +76,17 @@ class ResponsePlan:
     retrieved_used: list[RetrievedMemory] = field(default_factory=list)
     confidence: float = 0.5
     should_answer_directly: bool = True
+    causal_claims: list[CausalClaim] = field(default_factory=list)
+    referenced_experiences: list[ReferencedExperience] = field(default_factory=list)
+    uncertainty_levels: list[UncertaintyLevel] = field(default_factory=list)
+    self_reflection: list[str] = field(default_factory=list)
+    plan_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    tone: str = "neutral"
+    target_length: str = "medium"
 
     def to_record(self) -> dict[str, Any]:
         return {
+            "plan_id": self.plan_id,
             "mode": self.mode,
             "intent": self.intent,
             "thesis": self.thesis,
@@ -35,6 +98,36 @@ class ResponsePlan:
             "retrieved_used": [item.to_record() for item in self.retrieved_used],
             "confidence": self.confidence,
             "should_answer_directly": self.should_answer_directly,
+            "causal_claims": [item.to_record() for item in self.causal_claims],
+            "referenced_experiences": [item.to_record() for item in self.referenced_experiences],
+            "uncertainty_levels": [item.to_record() for item in self.uncertainty_levels],
+            "self_reflection": self.self_reflection,
+            "tone": self.tone,
+            "target_length": self.target_length,
+        }
+
+    def to_dlm_payload(self) -> dict[str, Any]:
+        """A strictly-shaped payload for the Darwin Language Module to render.
+
+        Only this view is shown to an external renderer. No Darwin internals
+        leak through, and every claim, uncertainty, and reference is explicit
+        so the renderer can be validated against it.
+        """
+
+        return {
+            "mode": self.mode,
+            "intent": self.intent,
+            "thesis": self.thesis,
+            "answer_points": list(self.answer_points),
+            "clarification_questions": list(self.clarification_questions),
+            "next_actions": list(self.next_actions),
+            "causal_claims": [claim.to_record() for claim in self.causal_claims],
+            "referenced_experiences": [item.to_record() for item in self.referenced_experiences],
+            "uncertainty_levels": [item.to_record() for item in self.uncertainty_levels],
+            "self_reflection": list(self.self_reflection),
+            "confidence": self.confidence,
+            "tone": self.tone,
+            "target_length": self.target_length,
         }
 
 
@@ -56,15 +149,94 @@ class DiscoursePlanner:
         top_items = packet.top(5)
 
         if frame.needs_clarification and not top_items:
-            return self._clarification_plan(frame, packet)
+            plan = self._clarification_plan(frame, packet)
+        elif frame.speech_act in {"teaching", "goal", "hypothesis", "correction"}:
+            plan = self._learning_plan(frame, packet, report)
+        elif frame.speech_act == "question":
+            plan = self._question_plan(frame, packet, darwin, adapter, goal, recent_events, focus_terms)
+        else:
+            plan = self._conversation_plan(frame, packet, report)
 
-        if frame.speech_act in {"teaching", "goal", "hypothesis", "correction"}:
-            return self._learning_plan(frame, packet, report)
+        return self._enrich_plan(plan, frame, packet, darwin, report)
 
-        if frame.speech_act == "question":
-            return self._question_plan(frame, packet, darwin, adapter, goal, recent_events, focus_terms)
+    def _enrich_plan(
+        self,
+        plan: ResponsePlan,
+        frame: SemanticFrame,
+        packet: RetrievalPacket,
+        darwin: Any,
+        report: Any,
+    ) -> ResponsePlan:
+        causal_claims: list[CausalClaim] = []
+        for belief in darwin.causal_model.beliefs(limit=5):
+            causal_claims.append(
+                CausalClaim(
+                    action=belief.action,
+                    variable=belief.variable,
+                    effect=belief.effect,
+                    confidence=belief.confidence,
+                    samples=belief.samples,
+                    condition=belief.condition,
+                )
+            )
+        plan.causal_claims = causal_claims
 
-        return self._conversation_plan(frame, packet, report)
+        plan.referenced_experiences = [
+            ReferencedExperience(
+                kind=item.kind,
+                title=item.title,
+                summary=item.content,
+                score=item.score,
+            )
+            for item in plan.retrieved_used[:6]
+        ]
+
+        levels: list[UncertaintyLevel] = []
+        if frame.confidence < 0.6:
+            levels.append(
+                UncertaintyLevel(
+                    target="interpretation",
+                    level=1.0 - frame.confidence,
+                    reason="semantic parse is weak",
+                )
+            )
+        if plan.confidence < 0.55:
+            levels.append(
+                UncertaintyLevel(
+                    target="answer",
+                    level=1.0 - plan.confidence,
+                    reason="grounded memory was thin",
+                )
+            )
+        for claim in causal_claims[:3]:
+            if claim.confidence < 0.6:
+                levels.append(
+                    UncertaintyLevel(
+                        target=f"belief:{claim.action}->{claim.variable}",
+                        level=1.0 - claim.confidence,
+                        reason=f"only {claim.samples} samples",
+                    )
+                )
+        plan.uncertainty_levels = levels
+
+        plan.self_reflection = [
+            f"current learning priority: {report.learning_priority}",
+            f"observations: {report.observations}",
+            f"strongest belief: {report.strongest_belief}",
+        ]
+        if plan.confidence >= 0.7:
+            plan.tone = "confident"
+        elif plan.confidence <= 0.4:
+            plan.tone = "tentative"
+        else:
+            plan.tone = "neutral"
+        if len(plan.answer_points) <= 1:
+            plan.target_length = "short"
+        elif len(plan.answer_points) >= 4:
+            plan.target_length = "long"
+        else:
+            plan.target_length = "medium"
+        return plan
 
     def _question_plan(
         self,

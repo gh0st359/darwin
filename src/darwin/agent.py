@@ -50,6 +50,7 @@ class Darwin:
             self.memory.store = self.store
         self._rng = random.Random(self.seed)
         self._time = 0
+        self._planner_overrides: dict[str, float] = {}
 
     @classmethod
     def from_store(

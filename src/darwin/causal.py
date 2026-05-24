@@ -253,6 +253,30 @@ class CausalModel:
         underexplored = 1.0 - min(1.0, count / max(1, self.min_samples))
         return max(prediction.uncertainty, underexplored)
 
+    def predict_chain(
+        self,
+        state: Mapping[str, Any],
+        action_sequence: Iterable[str],
+    ) -> list[Prediction]:
+        """Roll the model forward across a sequence of actions."""
+
+        predictions: list[Prediction] = []
+        current = dict(state)
+        for action in action_sequence:
+            prediction = self.predict(current, action)
+            predictions.append(prediction)
+            current = dict(prediction.state)
+        return predictions
+
+    def chain_uncertainty(self, predictions: Iterable[Prediction]) -> float:
+        prediction_list = list(predictions)
+        if not prediction_list:
+            return 0.0
+        running = 0.0
+        for prediction in prediction_list:
+            running = 1.0 - (1.0 - running) * (1.0 - prediction.uncertainty)
+        return running
+
     def action_count(self, action: str) -> int:
         return self._action_counts[action]
 

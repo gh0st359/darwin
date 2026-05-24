@@ -1,23 +1,47 @@
 """Project Darwin: a causal-adaptive AI kernel."""
 
 from darwin.agent import Darwin
-from darwin.discourse import ResponsePlan
+from darwin.causal_chain import CausalChain, CausalChainEngine, CausalGraph
+from darwin.discourse import CausalClaim, ReferencedExperience, ResponsePlan, UncertaintyLevel
+from darwin.dlm import DLMRenderResult, DarwinLanguageModule, GemmaDLM, StubDLM, gemma_dlm_available
+from darwin.instrumentation import BackgroundLogEntry, PlanLogEntry, StructuredLogger
 from darwin.retrieval import RetrievalPacket, RetrievedMemory
 from darwin.runtime import DarwinRuntime
+from darwin.self_modification import ModificationOutcome, ProposedModification, SelfModificationEngine
 from darwin.semantics import SemanticFrame, SemanticParser
 from darwin.thought import ThoughtTrace
+from darwin.training_data import TrainingDataCollector, TrainingPair
 from darwin.types import Action, Goal, Transition
 
 __all__ = [
     "Action",
+    "BackgroundLogEntry",
+    "CausalChain",
+    "CausalChainEngine",
+    "CausalClaim",
+    "CausalGraph",
     "Darwin",
+    "DarwinLanguageModule",
     "DarwinRuntime",
+    "DLMRenderResult",
+    "GemmaDLM",
     "Goal",
+    "ModificationOutcome",
+    "PlanLogEntry",
+    "ProposedModification",
+    "ReferencedExperience",
     "ResponsePlan",
     "RetrievalPacket",
     "RetrievedMemory",
+    "SelfModificationEngine",
     "SemanticFrame",
     "SemanticParser",
+    "StructuredLogger",
+    "StubDLM",
     "ThoughtTrace",
+    "TrainingDataCollector",
+    "TrainingPair",
     "Transition",
+    "UncertaintyLevel",
+    "gemma_dlm_available",
 ]

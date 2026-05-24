@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
 from darwin.causal import CausalModel, Prediction, RewardEstimate
+from darwin.causal_chain import CausalChain, CausalChainEngine
 from darwin.types import Action, Goal, State
 
 
@@ -34,13 +35,29 @@ class MultiStepPlan:
     goal_score: float
     uncertainty: float
     trace: list[str]
+    causal_chain: CausalChain | None = None
+    chain_confidence: float = 1.0
 
     def explain(self) -> str:
         names = " -> ".join(action.name for action in self.actions) or "no-op"
         return (
             f"{names}: score={self.score:.3f}, reward={self.total_expected_reward:.3f}, "
-            f"goal={self.goal_score:.3f}, uncertainty={self.uncertainty:.3f}"
+            f"goal={self.goal_score:.3f}, uncertainty={self.uncertainty:.3f}, "
+            f"chain_confidence={self.chain_confidence:.3f}"
         )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "actions": [action.name for action in self.actions],
+            "final_state": self.final_state,
+            "score": self.score,
+            "total_expected_reward": self.total_expected_reward,
+            "goal_score": self.goal_score,
+            "uncertainty": self.uncertainty,
+            "chain_confidence": self.chain_confidence,
+            "trace": self.trace,
+            "causal_chain": self.causal_chain.to_record() if self.causal_chain else None,
+        }
 
 
 class CausalPlanner:
@@ -48,6 +65,7 @@ class CausalPlanner:
 
     def __init__(self, model: CausalModel) -> None:
         self.model = model
+        self.chain_engine = CausalChainEngine(model)
 
     def rank(self, state: Mapping[str, Any], actions: Iterable[Action], goal: Goal) -> list[PlanCandidate]:
         current_score = goal_satisfaction(state, goal)
@@ -148,7 +166,24 @@ class CausalPlanner:
             expanded.sort(key=lambda plan: plan.score, reverse=True)
             beams = expanded[: max(1, beam_width)]
 
-        return beams[0]
+        chosen = beams[0]
+        if chosen.actions:
+            chain = self.chain_engine.simulate_chain(
+                state, [action.name for action in chosen.actions]
+            )
+            chosen.causal_chain = chain
+            chosen.chain_confidence = chain.chain_confidence
+            chosen.uncertainty = max(chosen.uncertainty, chain.chain_uncertainty)
+        return chosen
+
+    def reason_chain(
+        self,
+        state: Mapping[str, Any],
+        actions: Iterable[Action],
+        depth: int = 3,
+        beam: int = 4,
+    ) -> list[CausalChain]:
+        return self.chain_engine.explore_chains(state, actions, depth=depth, beam=beam)
 
 
 def goal_satisfaction(state: Mapping[str, Any], goal: Goal) -> float:
