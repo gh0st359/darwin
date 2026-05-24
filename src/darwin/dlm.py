@@ -18,18 +18,17 @@ from darwin.thought import ThoughtTrace
 
 
 DLM_SYSTEM_PROMPT = (
-    "You are the Darwin Language Module (DLM). You are a thin renderer, "
-    "not a thinker. You receive a JSON object describing what Darwin's "
-    "symbolic mind has decided to say, and you must render it as natural, "
-    "fluent English. You MUST NOT add facts, claims, examples, "
-    "knowledge, opinions, or reasoning that are not present in the JSON. "
-    "You MUST preserve every causal_claim verbatim in meaning, every "
-    "uncertainty_level explicitly, and you MUST never contradict the "
-    "thesis. Do not introduce metaphors, analogies, or comparisons to "
-    "external concepts. Do not say 'I think' unless the JSON has tone "
-    "'tentative'. Keep the response to the requested target_length. "
-    "Do not output JSON, code, or parser notation. Output ONLY the "
-    "rendered prose."
+    "You are Darwin's voice. You are given a short brief describing "
+    "what Darwin has decided to say. Rephrase it as natural, "
+    "conversational English in Darwin's first person. "
+    "Rules:\n"
+    "- Write 1-3 short sentences. Plain prose.\n"
+    "- Do not invent facts, examples, or claims that are not in the brief.\n"
+    "- Do not output JSON, code, lists, bullets, headings, or quoted keys.\n"
+    "- Do not say 'as an AI', 'language model', 'I was trained', or similar.\n"
+    "- Do not hedge unless the brief says you are uncertain.\n"
+    "- If the brief is a short greeting or small-talk, answer briefly.\n"
+    "- Output ONLY the sentences. Nothing else."
 )
 
 
@@ -95,8 +94,23 @@ class FaithfulnessValidator:
         "```",
     )
 
+    JSON_LEAK_KEYS = (
+        '"thesis":',
+        '"answer_points":',
+        '"causal_claims":',
+        '"uncertainty_levels":',
+        '"referenced_experiences":',
+        '"mode":',
+        '"intent":',
+        '"clarification_questions":',
+        '"next_actions":',
+        '"target_length":',
+        '"plan_id":',
+    )
+
     def validate(self, plan: ResponsePlan, text: str) -> tuple[bool, list[str]]:
         notes: list[str] = []
+        stripped = text.strip()
         lowered = text.lower()
 
         for marker in self.NOTATION_MARKERS:
@@ -107,8 +121,19 @@ class FaithfulnessValidator:
             if phrase in lowered:
                 notes.append(f"output contained forbidden phrase '{phrase}'")
 
-        if not text.strip():
+        if not stripped:
             notes.append("output was empty")
+
+        # JSON / structured-plan leak detection.
+        if stripped.startswith("{") or stripped.startswith("["):
+            notes.append("output is a JSON object instead of prose")
+        leak_hits = sum(1 for key in self.JSON_LEAK_KEYS if key in text)
+        if leak_hits >= 2:
+            notes.append("output regurgitated the structured plan as quoted fields")
+        if "\n  -" in text or "\n- " in text or text.count("\n*") >= 2:
+            notes.append("output is a bullet list instead of prose")
+        if text.count("\n\n") >= 2 and stripped.startswith(("Situation:", "Goal", "Main point", "Things")):
+            notes.append("output echoes the input brief rather than rendering it")
 
         for claim in plan.causal_claims[:3]:
             if claim.confidence >= 0.7 and claim.action not in lowered and claim.variable not in lowered:
@@ -301,13 +326,94 @@ class GemmaDLM:
         raise RuntimeError(f"Unknown DLM backend: {self.backend}")
 
     def _build_prompt(self, payload: dict[str, Any]) -> str:
-        user_message = (
-            "Render the following Darwin plan as natural English. "
-            "Preserve all causal_claims and uncertainty_levels. "
-            "Do not invent any external facts. Output prose only.\n\n"
-            f"PLAN:\n{json.dumps(payload, indent=2)}\n"
+        # We do NOT hand gemma-3-270m the raw JSON — a 270M model just
+        # echoes it. Instead we build a short human-readable brief
+        # listing only the fields that matter for rendering.
+        lines: list[str] = []
+        mode = payload.get("mode", "")
+        intent = payload.get("intent", "")
+        if mode:
+            lines.append(f"Situation: {mode}.")
+        if intent:
+            lines.append(f"Goal of the reply: {intent}.")
+
+        thesis = payload.get("thesis", "").strip()
+        if thesis:
+            lines.append(f"Main point: {thesis}")
+
+        points = [p for p in payload.get("answer_points", []) if p and p.strip()]
+        if points:
+            lines.append("Things to convey, in order:")
+            for point in points[:4]:
+                lines.append(f"  - {point.strip()}")
+
+        causal = payload.get("causal_claims", []) or []
+        strong_causal = [c for c in causal if float(c.get("confidence", 0.0)) >= 0.55]
+        if strong_causal:
+            lines.append("Facts you must respect (do not contradict):")
+            for claim in strong_causal[:3]:
+                cond = claim.get("condition", "always")
+                cond_text = "" if cond == "always" else f" when {cond}"
+                lines.append(
+                    f"  - {claim['action'].replace('_',' ')} makes "
+                    f"{claim['variable'].replace('_',' ')} "
+                    f"{self._human_effect(claim['effect'])}"
+                    f"{cond_text} (seen {claim['samples']} times)"
+                )
+
+        levels = payload.get("uncertainty_levels", []) or []
+        strong_uncertainty = [u for u in levels if float(u.get("level", 0.0)) >= 0.55]
+        if strong_uncertainty:
+            lines.append("Uncertainty you must surface:")
+            for level in strong_uncertainty[:2]:
+                target = str(level.get("target", "")).replace("_", " ")
+                reason = str(level.get("reason", ""))
+                tail = f" because {reason}" if reason else ""
+                lines.append(f"  - not very sure about {target}{tail}")
+
+        clarifications = payload.get("clarification_questions", []) or []
+        if clarifications:
+            lines.append(f"End with this question: {clarifications[0]}")
+
+        length = payload.get("target_length", "medium")
+        if length == "short":
+            length_note = "Keep it to one short sentence."
+        elif length == "long":
+            length_note = "Use up to three sentences."
+        else:
+            length_note = "Use one or two sentences."
+        lines.append(length_note)
+
+        tone = payload.get("tone", "neutral")
+        if tone == "tentative":
+            lines.append("Tone: tentative.")
+        elif tone == "confident":
+            lines.append("Tone: confident but not boastful.")
+        else:
+            lines.append("Tone: neutral and direct.")
+
+        lines.append(
+            "Now write the reply as Darwin, in plain English. "
+            "Do not output JSON, lists, or anything other than the sentences."
         )
-        return user_message
+        return "\n".join(lines)
+
+    def _human_effect(self, effect: str) -> str:
+        cleaned = effect.strip()
+        if cleaned == "False -> True":
+            return "true"
+        if cleaned == "True -> False":
+            return "false"
+        if cleaned.startswith("+="):
+            try:
+                delta = float(cleaned[2:].strip())
+            except ValueError:
+                return cleaned
+            if delta < 0:
+                return f"drop by {abs(delta):g}"
+            if delta > 0:
+                return f"rise by {delta:g}"
+        return cleaned
 
     def _call_ollama(self, payload: dict[str, Any]) -> str:
         host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")

@@ -29,6 +29,8 @@ class Critique:
 class ResponseCritic:
     """Checks whether a planned response respects Darwin's own constraints."""
 
+    SOCIAL_MODES = {"greeting", "farewell", "small_talk", "identity"}
+
     def evaluate(self, plan: ResponsePlan, draft: str, frame: SemanticFrame, packet: RetrievalPacket) -> Critique:
         issues: list[str] = []
         revisions: list[str] = []
@@ -49,12 +51,27 @@ class ResponseCritic:
             issues.append("response leaked parser notation")
             revisions.append("replace parser notation with natural language")
 
-        if frame.speech_act == "question" and plan.mode not in {"clarify", "self_report"}:
+        # Social modes get only the structural checks above. They should
+        # be short, they don't need retrieved memory, and they don't owe
+        # the user a confidence disclosure for saying "Hi".
+        if plan.mode in self.SOCIAL_MODES:
+            return Critique(passed=not issues, issues=issues, revisions=revisions)
+
+        if frame.speech_act == "question" and plan.mode not in {"clarify", "self_report", "belief_answer", "experiment", "memory_summary", "unknown_terms"}:
             if not plan.answer_points:
                 issues.append("question did not receive answer points")
                 revisions.append("use retrieved memory or ask a targeted clarification")
 
-        if packet.items and not plan.retrieved_used and plan.mode != "clarify":
+        # belief_answer, experiment, memory_summary derive their body from
+        # plan.causal_claims / plan.values / plan.unknown_terms rather than
+        # from retrieved memory — don't penalize them for ignoring it.
+        # 'learn' is acknowledging what the user said; old retrievals
+        # should not be dragged into the acknowledgement.
+        if (
+            packet.items
+            and not plan.retrieved_used
+            and plan.mode not in {"clarify", "belief_answer", "experiment", "memory_summary", "unknown_terms", "self_report", "learn"}
+        ):
             issues.append("retrieved memory was ignored")
             revisions.append("ground the response in retrieved memory")
 
@@ -73,7 +90,7 @@ class ResponseCritic:
         for level in plan.uncertainty_levels:
             if level.level >= 0.55 and not any(
                 marker in lower
-                for marker in ("uncertain", "limited", "not yet", "tentative", "thin", "weak", "may be")
+                for marker in ("uncertain", "limited", "not yet", "tentative", "thin", "weak", "may be", "not very sure")
             ):
                 issues.append(f"high uncertainty about {level.target} not disclosed")
                 revisions.append(f"surface uncertainty about {level.target}")
@@ -91,6 +108,11 @@ class ResponseCritic:
         return Critique(passed=not issues, issues=issues, revisions=revisions)
 
     def revise(self, plan: ResponsePlan, critique: Critique, frame: SemanticFrame, packet: RetrievalPacket) -> ResponsePlan:
+        # Critical: copy ALL v2 structured fields. If we drop
+        # causal_claims / uncertainty_levels / referenced_experiences
+        # here, modes that render from those fields (belief_answer,
+        # experiment, memory_summary, ...) collapse to "I don't know"
+        # after the very first critique pass.
         revised = ResponsePlan(
             mode=plan.mode,
             intent=plan.intent,
@@ -103,6 +125,13 @@ class ResponseCritic:
             retrieved_used=list(plan.retrieved_used),
             confidence=plan.confidence,
             should_answer_directly=plan.should_answer_directly,
+            causal_claims=list(plan.causal_claims),
+            referenced_experiences=list(plan.referenced_experiences),
+            uncertainty_levels=list(plan.uncertainty_levels),
+            self_reflection=list(plan.self_reflection),
+            plan_id=plan.plan_id,
+            tone=plan.tone,
+            target_length=plan.target_length,
         )
 
         if "response leaked parser notation" in critique.issues:

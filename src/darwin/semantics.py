@@ -538,6 +538,54 @@ class SemanticParser:
         instructions: list[str],
         hypotheses: list[SemanticProposition],
     ) -> str:
+        stripped = normalized.strip(" .!?,")
+        greeting_phrases = {
+            "hi", "hello", "hey", "yo", "sup", "hiya", "howdy", "greetings",
+            "good morning", "good afternoon", "good evening", "good night",
+            "morning", "afternoon", "evening",
+        }
+        farewell_phrases = {
+            "bye", "goodbye", "see you", "see ya", "later", "good night",
+            "talk later", "talk to you later", "ttyl", "cya",
+        }
+        # Multi-word small-talk markers can use substring matching since
+        # they almost never collide. Short single-token markers must match
+        # as whole words to avoid e.g. "ty" matching inside "brevity".
+        small_talk_substrings = {
+            "how are you", "how's it going", "hows it going", "what's up",
+            "whats up", "you good", "are you good", "how do you feel",
+            "how are things", "you there", "are you there", "anyone home",
+            "thank you",
+        }
+        small_talk_whole_words = {
+            "thanks", "thx", "ty", "ok", "okay", "cool",
+            "got it", "nice", "great", "awesome", "lol", "haha",
+        }
+        identity_phrases = {
+            "who are you", "what are you", "what is your name", "your name",
+            "what's your name", "introduce yourself", "tell me about yourself",
+            "what can you do", "what do you do",
+        }
+
+        word_set = set(re.findall(r"[a-z]+", normalized))
+
+        if questions and any(phrase in normalized for phrase in identity_phrases):
+            return "identity_question"
+        if stripped in greeting_phrases or any(
+            normalized.startswith(phrase + " ") or normalized == phrase
+            for phrase in greeting_phrases
+        ):
+            return "greeting"
+        if stripped in farewell_phrases or any(
+            normalized.startswith(phrase) for phrase in farewell_phrases
+        ):
+            return "farewell"
+        if len(normalized.split()) <= 8 and (
+            any(phrase in normalized for phrase in small_talk_substrings)
+            or any(phrase in word_set for phrase in small_talk_whole_words if " " not in phrase)
+            or any(phrase in normalized for phrase in small_talk_whole_words if " " in phrase)
+        ):
+            return "small_talk"
         if questions:
             return "question"
         if hypotheses:
