@@ -7,7 +7,7 @@ from pathlib import Path
 
 from darwin.agent import Darwin
 from darwin.dlm import GemmaDLM, StubDLM, gemma_dlm_available
-from darwin.embodiment import RoomSimulationAdapter
+from darwin.embodiment import RoomSimulationAdapter, UniverseSimulationAdapter
 from darwin.instrumentation import StructuredLogger
 from darwin.runtime import DarwinRuntime, ensure_chat_action
 from darwin.server import DEFAULT_HOST, DEFAULT_PORT, DarwinClient, DarwinDaemon, PortInUseError
@@ -15,7 +15,7 @@ from darwin.streaming import StreamingSpeaker
 from darwin.storage import PersistentStore
 from darwin.training_data import TrainingDataCollector
 from darwin.types import Goal
-from darwin.worlds import AdaptiveRoomWorld
+from darwin.worlds import AdaptiveRoomWorld, UniverseSimulation
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -166,13 +166,13 @@ def brain(
 ) -> int:
     """Run Darwin as a 24/7 daemon. No stdin loop; clients attach over TCP."""
 
-    world = AdaptiveRoomWorld(seed=seed)
-    adapter = RoomSimulationAdapter(world)
+    universe = UniverseSimulation(seed=seed)
+    adapter = UniverseSimulationAdapter(universe)
     store = PersistentStore(memory_path)
     actions = ensure_chat_action(adapter.possible_actions())
     goal = Goal(
-        desired={"room_bright": True, "fuse_intact": True},
-        weights={"room_bright": 2.0, "fuse_intact": 1.0},
+        desired={"room.room_bright": True, "room.fuse_intact": True, "space.a.y": 0},
+        weights={"room.room_bright": 1.2, "room.fuse_intact": 1.0, "space.a.y": 0.4},
         exploration_weight=0.35,
     )
     darwin = Darwin.from_store(
@@ -211,6 +211,7 @@ def brain(
 
     print("Project Darwin brain")
     print(f"memory={memory_path}")
+    print(f"embodiment={adapter.name}")
     print(f"dlm={dlm.name}")
     print(f"listening on {host}:{port}")
     print(f"background loops: {', '.join(runtime.loop_intervals)}")
@@ -331,6 +332,8 @@ def _print_remote_help() -> None:
                 "Chat: type anything (no leading slash) to talk to Darwin.",
                 "/status        show Darwin's self-model",
                 "/beliefs       show strongest causal beliefs",
+                "/beliefs DOMAIN  show beliefs for one universe domain",
+                "/universe      show the active embodiment domains",
                 "/concepts      show concept hierarchy",
                 "/experiments   show active experiment proposals",
                 "/think         run one cognition cycle now",
@@ -413,13 +416,13 @@ def live(
     dlm_backend: str = "ollama",
     dlm_model: str = "gemma3:270m",
 ) -> int:
-    world = AdaptiveRoomWorld(seed=seed)
-    adapter = RoomSimulationAdapter(world)
+    universe = UniverseSimulation(seed=seed)
+    adapter = UniverseSimulationAdapter(universe)
     store = PersistentStore(memory_path)
     actions = ensure_chat_action(adapter.possible_actions())
     goal = Goal(
-        desired={"room_bright": True, "fuse_intact": True},
-        weights={"room_bright": 2.0, "fuse_intact": 1.0},
+        desired={"room.room_bright": True, "room.fuse_intact": True, "space.a.y": 0},
+        weights={"room.room_bright": 1.2, "room.fuse_intact": 1.0, "space.a.y": 0.4},
         exploration_weight=0.35,
     )
     darwin = Darwin.from_store(
@@ -466,6 +469,7 @@ def live(
 
     print("Project Darwin live")
     print(f"memory={memory_path}")
+    print(f"embodiment={adapter.name}")
     print(f"dlm={dlm.name} (backend={dlm_backend if dlm_choice == 'gemma' else 'composer'})")
     print("Type /help for commands. Type /exit to stop.")
     if background:
@@ -518,6 +522,8 @@ def _handle_command(
                 [
                     "/status         show Darwin's self-model",
                     "/beliefs        show strongest causal beliefs",
+                    "/beliefs DOMAIN show beliefs for one universe domain",
+                    "/universe       show the active embodiment domains",
                     "/concepts       show concept hierarchy",
                     "/semantics      show recent parsed meanings",
                     "/experiments    show active experiment proposals",
@@ -555,14 +561,14 @@ def _handle_command(
         return True
 
     if command == "/beliefs":
-        beliefs = runtime.darwin.causal_model.beliefs(limit=15)
-        if not beliefs:
-            print("No grounded causal beliefs yet.")
-        for belief in beliefs:
-            print(
-                f"- if {belief.condition}: {belief.action} -> {belief.variable} "
-                f"{belief.effect} confidence={belief.confidence:.2f} n={belief.samples}"
-            )
+        domain = parts[1].lower() if len(parts) > 1 else None
+        for line in _belief_lines(runtime, domain=domain, limit=15):
+            print(line)
+        return True
+
+    if command == "/universe":
+        for line in _universe_lines(runtime):
+            print(line)
         return True
 
     if command == "/concepts":
@@ -798,6 +804,54 @@ def _handle_command(
 
     print(f"Unknown command: {command}. Type /help.")
     return True
+
+
+def _belief_lines(runtime: DarwinRuntime, domain: str | None = None, limit: int = 15) -> list[str]:
+    beliefs = runtime.darwin.causal_model.beliefs(limit=limit * 3)
+    if domain:
+        beliefs = [
+            belief
+            for belief in beliefs
+            if belief.action.startswith(f"{domain}/") or belief.variable.startswith(f"{domain}.")
+        ][:limit]
+    else:
+        beliefs = beliefs[:limit]
+    if not beliefs:
+        suffix = f" for {domain}" if domain else ""
+        return [f"No grounded causal beliefs yet{suffix}."]
+    return [
+        (
+            f"- if {belief.condition}: {belief.action} -> {belief.variable} "
+            f"{belief.effect} confidence={belief.confidence:.2f} n={belief.samples}"
+        )
+        for belief in beliefs
+    ]
+
+
+def _universe_lines(runtime: DarwinRuntime) -> list[str]:
+    adapter = runtime.adapter
+    state = adapter.observe()
+    actions = adapter.possible_actions()
+    domains = sorted(
+        {
+            str(action.metadata.get("domain", action.name.split("/", 1)[0] if "/" in action.name else "world"))
+            for action in actions
+        }
+    )
+    lines = [
+        f"embodiment={getattr(adapter, 'name', 'unknown')}",
+        "domains=" + ", ".join(domains),
+        f"actions={len(actions)} variables={len(state)}",
+    ]
+    for domain in domains:
+        domain_actions = [
+            action.name
+            for action in actions
+            if action.metadata.get("domain") == domain or action.name.startswith(f"{domain}/")
+        ]
+        domain_variables = [key for key in state if key.startswith(f"{domain}.")]
+        lines.append(f"- {domain}: actions={len(domain_actions)} variables={len(domain_variables)}")
+    return lines
 
 
 if __name__ == "__main__":

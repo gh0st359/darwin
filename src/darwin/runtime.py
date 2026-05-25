@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -88,6 +89,7 @@ class DarwinRuntime:
         self.last_simulation: dict[str, Any] | None = None
         self.last_consolidation: dict[str, Any] | None = None
         self.last_uncertainty_scan: dict[str, Any] | None = None
+        self._attention_queue: deque[dict[str, Any]] = deque(maxlen=50)
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._threads: dict[str, threading.Thread] = {}
@@ -183,9 +185,13 @@ class DarwinRuntime:
     def _loop_experiment(self) -> RuntimeEvent | None:
         with self._lock:
             state = self.adapter.observe()
+            attention = self._next_attention()
+            actions = self._actions_for_attention(attention) if attention is not None else []
+            if not actions:
+                actions = self.adapter.possible_actions()
             proposals = self.darwin.experiment_engine.propose(
                 state,
-                self.adapter.possible_actions(),
+                actions,
                 goal=self.goal,
                 limit=3,
             )
@@ -200,13 +206,14 @@ class DarwinRuntime:
                     after=after,
                     reward=reward,
                     t=self._next_time(),
-                    metadata={
+                    metadata=self._metadata_for_action(proposal.action, {
                         "mode": "active_experiment",
                         "loop": "experiment",
                         "question": proposal.question,
                         "predicted_state": proposal.predicted_state,
                         "expected_reward": proposal.expected_reward,
-                    },
+                        **(attention or {}),
+                    }),
                 )
                 self.darwin.learn(transition)
                 result = self.darwin.experiment_engine.evaluate(proposal, transition)
@@ -353,6 +360,7 @@ class DarwinRuntime:
             response = self._respond(message, user_frame)
             darwin_frame = self.darwin.interpret_language(response, source="darwin")
             transition = self.conversation.make_transition(message, response, t=self._next_time())
+            self._remember_attention_from_frame(user_frame)
             transition = Transition(
                 before=transition.before,
                 action=transition.action,
@@ -511,12 +519,68 @@ class DarwinRuntime:
         return draft
 
     def _experiment_event(self, result: ExperimentResult, loop: str = "main") -> RuntimeEvent:
+        domain = result.transition.metadata.get("domain")
+        domain_prefix = f"[{domain}] " if domain else ""
         if result.confirmed:
-            content = f"Experiment confirmed: {result.proposal.question}"
+            content = f"{domain_prefix}Experiment confirmed: {result.proposal.question}"
         else:
             surprise_list = ", ".join(result.surprises)
-            content = f"Experiment produced surprise in {surprise_list}: {result.proposal.question}"
+            content = f"{domain_prefix}Experiment produced surprise in {surprise_list}: {result.proposal.question}"
         return self._event("experiment", content, payload=result.to_record(), loop=loop)
+
+    def _metadata_for_action(self, action: Action, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+        metadata: dict[str, Any] = {"scope": "world", "world": getattr(self.adapter, "name", "unknown")}
+        action_metadata = getattr(self.adapter, "action_metadata", None)
+        if callable(action_metadata):
+            metadata.update(dict(action_metadata(action)))
+        metadata.update(dict(action.metadata))
+        if "vocabulary" in metadata:
+            metadata["vocabulary"] = sorted(metadata["vocabulary"])
+        if extra:
+            metadata.update(extra)
+        metadata.setdefault("domain", metadata.get("world", "world"))
+        return metadata
+
+    def _remember_attention_from_frame(self, frame) -> None:
+        terms = set(frame.tokens)
+        for grounding in frame.groundings:
+            terms.add(grounding.name)
+            terms.update(grounding.name.replace("_", " ").replace("/", " ").replace(".", " ").split())
+        for proposition in frame.hypotheses or frame.propositions:
+            terms.update(proposition.subject.split())
+            terms.update(proposition.object.split())
+            terms.add(proposition.relation)
+        if frame.speech_act in {"teaching", "hypothesis", "goal", "correction", "directive"} and terms:
+            self._attention_queue.append(
+                {
+                    "attention_source": (
+                        "semantic_hypothesis"
+                        if frame.speech_act in {"teaching", "hypothesis"} or frame.hypotheses or frame.propositions
+                        else "semantic_focus"
+                    ),
+                    "attention_terms": sorted(terms)[:40],
+                    "attention_text": frame.original_text,
+                }
+            )
+
+    def _next_attention(self) -> dict[str, Any] | None:
+        while self._attention_queue:
+            attention = self._attention_queue.popleft()
+            terms = set(attention.get("attention_terms", []))
+            if self._actions_for_attention(attention):
+                return {**attention, "attention_terms": sorted(terms)}
+        return None
+
+    def _actions_for_attention(self, attention: dict[str, Any] | None) -> list[Action]:
+        if attention is None:
+            return []
+        terms = set(str(term).lower() for term in attention.get("attention_terms", []))
+        finder = getattr(self.adapter, "actions_for_terms", None)
+        if callable(finder):
+            matches = finder(terms)
+            if matches:
+                return matches
+        return []
 
     def _event(
         self,

@@ -5,17 +5,25 @@ chain. Not an API wrapper. Darwin is built around direct experience, learned
 cause and effect, and a 24/7 symbolic mind that can hold a conversation
 without ever delegating its reasoning to a pre-trained model.
 
-The current release is **v2: Eternal Causal Mind**.
+The current release is **v3: Unified Universe Substrate**.
 
-## What v2 is
+## What v3 is
 
 A continuously-thinking causal intelligence with five concurrent background
 cognition loops, a daemon/client split so the mind runs 24/7 in one
 terminal while you chat from another, a self-modification engine that
-rewrites its own knobs when doing so reduces prediction error, and an
+rewrites its own knobs when doing so reduces prediction error, a single
+universe embodiment with room, arithmetic, spatial, and time facets, and an
 optional thin language renderer (the **Darwin Language Module / DLM**)
 that converts Darwin's structured plans into natural English without ever
 being allowed to reason on its own.
+
+The old adaptive room still exists as a regression environment, but `darwin
+brain` and `darwin live` now default to one unified `UniverseSimulation`.
+Darwin is not rotating through separate toy worlds. It observes one flattened
+state space and learns partitioned causal structure inside it: `room/*`,
+`math/*`, `space/*`, and `time/*` interventions all belong to the same
+embodied substrate.
 
 ### Non-negotiables
 
@@ -26,6 +34,8 @@ being allowed to reason on its own.
   `FaithfulnessValidator`.
 - No external LLM ever generates Darwin's thinking, concepts, or causal
   rules.
+- Conversation is remembered as experience, but it is tagged as
+  `scope=conversation` so it does not pollute default world-causal beliefs.
 - Every output passes a faithfulness validator + a response critic.
   Renderings that drift are rejected; the deterministic composer takes
   over.
@@ -77,7 +87,7 @@ being allowed to reason on its own.
 pip install -e .
 
 # Run the test suite
-python -m unittest discover tests   # 44 tests in <6s
+python -m unittest discover tests   # 50 tests in <6s
 
 # Two-terminal workflow
 darwin brain          # terminal 1: 24/7 mind + thought stream
@@ -95,6 +105,14 @@ Single-terminal mode is still available:
 darwin live
 ```
 
+Useful v3 inspection commands:
+
+```text
+/universe       show the active embodiment domains
+/beliefs        show default world-causal beliefs
+/beliefs math   show arithmetic-domain beliefs only
+```
+
 ## What's in the box
 
 | Phase | What | File |
@@ -105,6 +123,7 @@ darwin live
 | 1 | self-modification engine (proposes + tests + accepts) | `self_modification.py` |
 | 2 | 5-loop multi-threaded 24/7 mind, persistent runtime state | `runtime.py` |
 | 2 | brain daemon + chat client (TCP, JSON-line) | `server.py` |
+| 3 | unified universe substrate with room/math/space/time facets | `worlds.py`, `embodiment.py` |
 | 3 | DLM Protocol + StubDLM + GemmaDLM + FaithfulnessValidator | `dlm.py` |
 | 4 | training-pair collector + JSONL export | `training_data.py` |
 | 5 | clean two-terminal UX, full CLI, persistence | `cli.py`, `storage.py` |
@@ -125,6 +144,8 @@ Chat commands (in `darwin connect` or `darwin live`):
 ```text
 /status         self-model
 /beliefs        strongest causal beliefs
+/beliefs math   strongest causal beliefs in one domain
+/universe       active embodiment domains
 /concepts       concept hierarchy
 /experiments    active experiment proposals
 /think          run one cognition cycle now
@@ -203,7 +224,7 @@ src/darwin/
   training_data.py     DLM (plan -> rendering) pair collection
   types.py             Shared data structures
   world_model.py       Structured world model + hypotheses
-  worlds.py            Test environments (adaptive room)
+  worlds.py            Test environments + unified universe substrate
 tests/
   test_agent.py
   test_brain_daemon.py
@@ -212,6 +233,7 @@ tests/
   test_semantics.py
   test_v02.py
   test_v2.py
+  test_v3_universe.py
 ```
 
 ## In-depth docs

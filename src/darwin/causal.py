@@ -179,6 +179,8 @@ class CausalModel:
         self._rewards: dict[str, RewardStats] = defaultdict(RewardStats)
         self._conditioned_rewards: dict[tuple[str, str, Any], RewardStats] = defaultdict(RewardStats)
         self._action_counts: Counter[str] = Counter()
+        self._action_scopes: dict[str, Counter[str]] = defaultdict(Counter)
+        self._action_worlds: dict[str, Counter[str]] = defaultdict(Counter)
 
     def learn(self, transition: Transition) -> None:
         action = transition.action
@@ -187,6 +189,12 @@ class CausalModel:
         variables = sorted(set(before) | set(after))
 
         self._action_counts[action] += 1
+        default_scope = "conversation" if action == "chat_with_user" else "world"
+        default_world = "conversation" if action == "chat_with_user" else "unknown"
+        scope = str(transition.metadata.get("scope", default_scope))
+        world = str(transition.metadata.get("world", default_world))
+        self._action_scopes[action][scope] += 1
+        self._action_worlds[action][world] += 1
         self._rewards[action].update(float(transition.reward))
 
         for feature, value in before.items():
@@ -291,10 +299,18 @@ class CausalModel:
     def total_observations(self) -> int:
         return sum(self._action_counts.values())
 
-    def beliefs(self, limit: int = 20) -> list[CausalBelief]:
+    def beliefs(
+        self,
+        limit: int = 20,
+        *,
+        scope: str | None = "world",
+        world: str | None = None,
+    ) -> list[CausalBelief]:
         beliefs: list[CausalBelief] = []
 
         for (action, variable), stats in self._effects.items():
+            if not self._matches_scope(action, scope=scope, world=world):
+                continue
             if stats.samples == 0 or stats.changed == 0:
                 continue
             beliefs.append(
@@ -308,6 +324,8 @@ class CausalModel:
             )
 
         for (action, variable, feature, value), stats in self._conditioned_effects.items():
+            if not self._matches_scope(action, scope=scope, world=world):
+                continue
             if stats.samples < 2 or stats.changed == 0:
                 continue
             beliefs.append(
@@ -323,6 +341,25 @@ class CausalModel:
 
         beliefs.sort(key=lambda belief: (belief.confidence, belief.samples), reverse=True)
         return beliefs[:limit]
+
+    def action_scope(self, action: str) -> str:
+        scopes = self._action_scopes.get(action)
+        if not scopes:
+            return "world"
+        return scopes.most_common(1)[0][0]
+
+    def action_world(self, action: str) -> str:
+        worlds = self._action_worlds.get(action)
+        if not worlds:
+            return "unknown"
+        return worlds.most_common(1)[0][0]
+
+    def _matches_scope(self, action: str, *, scope: str | None, world: str | None) -> bool:
+        if scope is not None and self.action_scope(action) != scope:
+            return False
+        if world is not None and self.action_world(action) != world:
+            return False
+        return True
 
     def _select_effect_stats(
         self,

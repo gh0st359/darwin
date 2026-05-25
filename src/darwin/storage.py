@@ -38,15 +38,17 @@ class PersistentStore:
         self._initialize()
 
     def record_transition(self, transition: Transition) -> int:
+        world = str(transition.metadata.get("world", "unknown"))
         with self._connect() as connection:
             cursor = connection.execute(
                 """
-                insert into transitions(t, action, before_state, after_state, reward, metadata)
-                values (?, ?, ?, ?, ?, ?)
+                insert into transitions(t, action, world, before_state, after_state, reward, metadata)
+                values (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     transition.t,
                     transition.action,
+                    world,
                     dumps(dict(transition.before)),
                     dumps(dict(transition.after)),
                     float(transition.reward),
@@ -58,7 +60,7 @@ class PersistentStore:
 
     def load_transitions(self, limit: int | None = None) -> list[Transition]:
         sql = """
-            select t, action, before_state, after_state, reward, metadata
+            select t, action, world, before_state, after_state, reward, metadata
             from transitions
             order by id asc
         """
@@ -70,17 +72,24 @@ class PersistentStore:
         with self._connect() as connection:
             rows = connection.execute(sql, params).fetchall()
 
-        return [
-            Transition(
-                before=loads(row["before_state"]),
-                action=row["action"],
-                after=loads(row["after_state"]),
-                reward=float(row["reward"]),
-                t=int(row["t"]),
-                metadata=loads(row["metadata"]),
+        transitions: list[Transition] = []
+        for row in rows:
+            metadata = loads(row["metadata"])
+            metadata.setdefault("world", row["world"])
+            if row["action"] == "chat_with_user":
+                metadata.setdefault("scope", "conversation")
+                metadata.setdefault("domain", "language")
+            transitions.append(
+                Transition(
+                    before=loads(row["before_state"]),
+                    action=row["action"],
+                    after=loads(row["after_state"]),
+                    reward=float(row["reward"]),
+                    t=int(row["t"]),
+                    metadata=metadata,
+                )
             )
-            for row in rows
-        ]
+        return transitions
 
     def record_concept(self, concept: Mapping[str, Any]) -> None:
         with self._connect() as connection:
@@ -331,6 +340,7 @@ class PersistentStore:
                     id integer primary key autoincrement,
                     t integer not null,
                     action text not null,
+                    world text not null default 'unknown',
                     before_state text not null,
                     after_state text not null,
                     reward real not null,
@@ -406,4 +416,10 @@ class PersistentStore:
                 );
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute("pragma table_info(transitions)").fetchall()
+            }
+            if "world" not in columns:
+                connection.execute("alter table transitions add column world text not null default 'unknown'")
             connection.commit()

@@ -315,9 +315,18 @@ class DarwinDaemon:
                 lines.append(f"storage={runtime.store.counts()}")
             return lines
         if head == "/beliefs":
-            beliefs = runtime.darwin.causal_model.beliefs(limit=15)
+            domain = parts[1].lower() if len(parts) > 1 else None
+            beliefs = runtime.darwin.causal_model.beliefs(limit=45)
+            if domain:
+                beliefs = [
+                    belief
+                    for belief in beliefs
+                    if belief.action.startswith(f"{domain}/") or belief.variable.startswith(f"{domain}.")
+                ]
+            beliefs = beliefs[:15]
             if not beliefs:
-                return ["No grounded causal beliefs yet."]
+                suffix = f" for {domain}" if domain else ""
+                return [f"No grounded causal beliefs yet{suffix}."]
             return [
                 (
                     f"- if {b.condition}: {b.action} -> {b.variable} {b.effect} "
@@ -325,6 +334,30 @@ class DarwinDaemon:
                 )
                 for b in beliefs
             ]
+        if head == "/universe":
+            adapter = runtime.adapter
+            state = adapter.observe()
+            actions = adapter.possible_actions()
+            domains = sorted(
+                {
+                    str(action.metadata.get("domain", action.name.split("/", 1)[0] if "/" in action.name else "world"))
+                    for action in actions
+                }
+            )
+            out = [
+                f"embodiment={getattr(adapter, 'name', 'unknown')}",
+                "domains=" + ", ".join(domains),
+                f"actions={len(actions)} variables={len(state)}",
+            ]
+            for domain in domains:
+                domain_actions = [
+                    action.name
+                    for action in actions
+                    if action.metadata.get("domain") == domain or action.name.startswith(f"{domain}/")
+                ]
+                domain_variables = [key for key in state if key.startswith(f"{domain}.")]
+                out.append(f"- {domain}: actions={len(domain_actions)} variables={len(domain_variables)}")
+            return out
         if head == "/concepts":
             return [
                 f"- L{c.level} {c.kind}: {c.name} support={c.support} rmean={c.reward_mean:.2f}"

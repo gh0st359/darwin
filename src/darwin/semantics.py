@@ -243,6 +243,13 @@ class SemanticParser:
             },
             "self_model": {"self model", "metacognition", "self awareness", "introspection"},
             "world_model": {"world model", "reality", "world", "cause and effect", "causality"},
+            "math.x": {"number", "numbers", "numeric state", "arithmetic result", "result"},
+            "math.result_is_even": {"even", "even number", "parity"},
+            "math.result_is_zero": {"zero", "is zero"},
+            "space.a.x": {"block a position", "block a x", "a position"},
+            "space.b.x": {"block b position", "block b x", "b position"},
+            "space.a.y": {"block a height", "block a y", "a height"},
+            "space.b.y": {"block b height", "block b y", "b height"},
         }
         self.topic_keywords: dict[str, set[str]] = {
             "language": {
@@ -265,6 +272,8 @@ class SemanticParser:
             "experiments": {"experiment", "test", "uncertain", "hypothesis", "prove"},
             "self": {"self", "mind", "thinking", "aware", "metacognition", "consciousness"},
             "causality": {"cause", "effect", "because", "consequence", "causal"},
+            "math": {"math", "number", "numbers", "arithmetic", "addition", "subtraction", "multiply", "zero", "equation"},
+            "space": {"space", "spatial", "block", "blocks", "physics", "motion", "position", "push", "lift", "drop", "gravity"},
             "vision": {"agi", "asi", "intelligence", "darwin", "frontier", "brain"},
             "tools": {"tool", "web", "scrape", "huggingface", "dataset", "api"},
         }
@@ -339,12 +348,15 @@ class SemanticParser:
         for action_name in action_names | set(self.action_aliases):
             aliases = set(self.action_aliases.get(action_name, set()))
             aliases.add(action_name.replace("_", " "))
+            aliases.add(action_name.replace("/", " ").replace("_", " "))
+            aliases.add(action_name.rsplit("/", 1)[-1].replace("_", " "))
             self._append_matches(groundings, seen, normalized, "action", action_name, aliases)
 
         variable_names = set(known_variables) | set(self.variable_aliases)
         for variable in variable_names:
             aliases = set(self.variable_aliases.get(variable, set()))
             aliases.add(variable.replace("_", " "))
+            aliases.add(variable.replace(".", " ").replace("_", " "))
             self._append_matches(groundings, seen, normalized, "variable", variable, aliases)
 
         for concept in known_concepts:

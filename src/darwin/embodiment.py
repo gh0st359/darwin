@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from darwin.types import Action, State, Transition
-from darwin.worlds import AdaptiveRoomWorld
+from darwin.worlds import AdaptiveRoomWorld, UniverseSimulation
 
 
 class EnvironmentAdapter(Protocol):
@@ -18,6 +18,12 @@ class EnvironmentAdapter(Protocol):
         ...
 
     def apply(self, action: Action) -> tuple[State, float]:
+        ...
+
+    def action_metadata(self, action: Action | str) -> dict[str, Any]:
+        ...
+
+    def actions_for_terms(self, terms: set[str]) -> list[Action]:
         ...
 
 
@@ -36,6 +42,42 @@ class RoomSimulationAdapter:
 
     def apply(self, action: Action) -> tuple[State, float]:
         return self.world.apply(action)
+
+    def action_metadata(self, action: Action | str) -> dict[str, Any]:
+        action_name = action.name if isinstance(action, Action) else action
+        domain = "time" if action_name == "wait" else "room"
+        return {"scope": "world", "world": self.name, "domain": domain}
+
+    def actions_for_terms(self, terms: set[str]) -> list[Action]:
+        if not terms:
+            return []
+        vocabulary = {"room", "curtain", "curtains", "light", "bright", "fuse", "switch", "battery"}
+        if terms & vocabulary:
+            return self.possible_actions()
+        return []
+
+
+@dataclass
+class UniverseSimulationAdapter:
+    """Embodiment adapter for Darwin's single shared universe substrate."""
+
+    universe: UniverseSimulation
+    name: str = "universe"
+
+    def observe(self) -> State:
+        return self.universe.observe()
+
+    def possible_actions(self) -> list[Action]:
+        return self.universe.possible_actions()
+
+    def apply(self, action: Action) -> tuple[State, float]:
+        return self.universe.apply(action)
+
+    def action_metadata(self, action: Action | str) -> dict[str, Any]:
+        return self.universe.action_metadata(action)
+
+    def actions_for_terms(self, terms: set[str]) -> list[Action]:
+        return self.universe.actions_for_terms(terms)
 
 
 class ConversationAdapter:
@@ -83,7 +125,13 @@ class ConversationAdapter:
             after=after,
             reward=reward,
             t=t,
-            metadata={"user_message": message, "darwin_response": response},
+            metadata={
+                "scope": "conversation",
+                "world": self.name,
+                "domain": "language",
+                "user_message": message,
+                "darwin_response": response,
+            },
         )
 
     def _topic(self, tokens: list[str]) -> str:
@@ -118,4 +166,3 @@ class ConversationAdapter:
         if "I will" in response:
             return "directive_ack"
         return "conversation"
-
