@@ -246,10 +246,11 @@ class SemanticParser:
             "math.x": {"number", "numbers", "numeric state", "arithmetic result", "result"},
             "math.result_is_even": {"even", "even number", "parity"},
             "math.result_is_zero": {"zero", "is zero"},
-            "space.a.x": {"block a position", "block a x", "a position"},
-            "space.b.x": {"block b position", "block b x", "b position"},
+            "space.a.x": {"block a position", "block a x", "a position", "moving blocks", "move blocks", "block motion"},
+            "space.b.x": {"block b position", "block b x", "b position", "blocks", "block position"},
             "space.a.y": {"block a height", "block a y", "a height"},
             "space.b.y": {"block b height", "block b y", "b height"},
+            "space.held": {"held block", "holding block", "lifted block"},
         }
         self.topic_keywords: dict[str, set[str]] = {
             "language": {
@@ -273,7 +274,7 @@ class SemanticParser:
             "self": {"self", "mind", "thinking", "aware", "metacognition", "consciousness"},
             "causality": {"cause", "effect", "because", "consequence", "causal"},
             "math": {"math", "number", "numbers", "arithmetic", "addition", "subtraction", "multiply", "zero", "equation"},
-            "space": {"space", "spatial", "block", "blocks", "physics", "motion", "position", "push", "lift", "drop", "gravity"},
+            "space": {"space", "spatial", "block", "blocks", "physics", "motion", "move", "moving", "moved", "position", "push", "lift", "drop", "gravity"},
             "vision": {"agi", "asi", "intelligence", "darwin", "frontier", "brain"},
             "tools": {"tool", "web", "scrape", "huggingface", "dataset", "api"},
         }
@@ -573,15 +574,18 @@ class SemanticParser:
             "thanks", "thx", "ty", "ok", "okay", "cool",
             "got it", "nice", "great", "awesome", "lol", "haha",
         }
-        identity_phrases = {
+        identity_exact_phrases = {
             "who are you", "what are you", "what is your name", "your name",
-            "what's your name", "introduce yourself", "tell me about yourself",
-            "what can you do", "what do you do",
+            "what's your name", "what can you do", "what do you do",
         }
+        identity_prefix_phrases = {"introduce yourself", "tell me about yourself"}
 
         word_set = set(re.findall(r"[a-z]+", normalized))
 
-        if questions and any(phrase in normalized for phrase in identity_phrases):
+        if questions and (
+            stripped in identity_exact_phrases
+            or any(stripped.startswith(phrase) for phrase in identity_prefix_phrases)
+        ):
             return "identity_question"
         if stripped in greeting_phrases or any(
             normalized.startswith(phrase + " ") or normalized == phrase
@@ -671,6 +675,7 @@ class SemanticParser:
         score += min(0.14, 0.06 * len(goals))
         score += min(0.12, 0.04 * len(instructions))
         score += 0.06 if questions else 0.0
+        score += 0.06 if questions and groundings else 0.0
         score += 0.05 if corrections else 0.0
         score += min(0.08, 0.03 * len(values))
         if len(tokens) <= 3 and not groundings:

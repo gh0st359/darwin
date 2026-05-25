@@ -26,6 +26,9 @@ class EnvironmentAdapter(Protocol):
     def actions_for_terms(self, terms: set[str]) -> list[Action]:
         ...
 
+    def variables_for_domain(self, domain: str) -> list[str]:
+        ...
+
 
 @dataclass
 class RoomSimulationAdapter:
@@ -56,6 +59,11 @@ class RoomSimulationAdapter:
             return self.possible_actions()
         return []
 
+    def variables_for_domain(self, domain: str) -> list[str]:
+        if domain not in {"room", "time"}:
+            return []
+        return sorted(self.observe())
+
 
 @dataclass
 class UniverseSimulationAdapter:
@@ -78,6 +86,9 @@ class UniverseSimulationAdapter:
 
     def actions_for_terms(self, terms: set[str]) -> list[Action]:
         return self.universe.actions_for_terms(terms)
+
+    def variables_for_domain(self, domain: str) -> list[str]:
+        return self.universe.variables_for_domain(domain)
 
 
 class ConversationAdapter:

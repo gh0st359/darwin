@@ -189,15 +189,25 @@ class DarwinRuntime:
             actions = self._actions_for_attention(attention) if attention is not None else []
             if not actions:
                 actions = self.adapter.possible_actions()
+            variable_filter = self._variable_filter_for_actions(actions)
             proposals = self.darwin.experiment_engine.propose(
                 state,
                 actions,
                 goal=self.goal,
-                limit=3,
+                limit=max(3, len(actions)),
+                variable_filter=variable_filter,
+                variable_filter_for_action=self._variable_filter_for_action,
             )
-            proposal = proposals[0] if proposals else None
+            proposal = self._select_experiment_proposal(proposals, attention)
 
-            if proposal is not None and proposal.uncertainty >= 0.25:
+            if proposal is not None:
+                mode = (
+                    "active_experiment"
+                    if proposal.uncertainty >= 0.25
+                    else "attention_experiment"
+                    if attention is not None
+                    else "maintenance_experiment"
+                )
                 before = self.adapter.observe()
                 after, reward = self.adapter.apply(proposal.action)
                 transition = Transition(
@@ -207,11 +217,11 @@ class DarwinRuntime:
                     reward=reward,
                     t=self._next_time(),
                     metadata=self._metadata_for_action(proposal.action, {
-                        "mode": "active_experiment",
                         "loop": "experiment",
                         "question": proposal.question,
                         "predicted_state": proposal.predicted_state,
                         "expected_reward": proposal.expected_reward,
+                        "mode": mode,
                         **(attention or {}),
                     }),
                 )
@@ -540,6 +550,51 @@ class DarwinRuntime:
             metadata.update(extra)
         metadata.setdefault("domain", metadata.get("world", "world"))
         return metadata
+
+    def _select_experiment_proposal(
+        self,
+        proposals: list[Any],
+        attention: dict[str, Any] | None,
+    ) -> Any | None:
+        if not proposals:
+            return None
+        if proposals[0].uncertainty >= 0.25 or attention is not None:
+            return proposals[0]
+        return sorted(
+            proposals,
+            key=lambda proposal: (
+                self.darwin.causal_model.action_count(proposal.action.name),
+                str(proposal.action.metadata.get("domain", "")),
+                proposal.action.name,
+            ),
+        )[0]
+
+    def _variable_filter_for_actions(self, actions: list[Action]) -> Callable[[str], bool] | None:
+        domains = {
+            str(action.metadata.get("domain", ""))
+            for action in actions
+            if action.metadata.get("domain")
+        }
+        if len(domains) != 1:
+            return None
+        domain = next(iter(domains))
+        variable_finder = getattr(self.adapter, "variables_for_domain", None)
+        if not callable(variable_finder):
+            return None
+        variables = set(variable_finder(domain))
+        if not variables:
+            return None
+        return variables.__contains__
+
+    def _variable_filter_for_action(self, action: Action, variable: str) -> bool:
+        domain = str(action.metadata.get("domain", ""))
+        if not domain:
+            return True
+        variable_finder = getattr(self.adapter, "variables_for_domain", None)
+        if not callable(variable_finder):
+            return True
+        variables = set(variable_finder(domain))
+        return variable in variables if variables else True
 
     def _remember_attention_from_frame(self, frame) -> None:
         terms = set(frame.tokens)

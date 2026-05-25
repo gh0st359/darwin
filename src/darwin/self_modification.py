@@ -79,6 +79,10 @@ def _prediction_error(darwin: Any, sample: list[Transition]) -> float:
 class SelfModificationEngine:
     """Generates, tests, and accepts small tweaks to Darwin's own knobs."""
 
+    MIN_CAUSAL_SAMPLES = 3
+    MIN_EXPLORATION_RATE = 0.05
+    MIN_CURIOSITY_BIAS = 1.0
+
     def __init__(self, darwin: Any, holdout_size: int = 12) -> None:
         self.darwin = darwin
         self.holdout_size = holdout_size
@@ -98,6 +102,9 @@ class SelfModificationEngine:
 
         snapshot = self._snapshot()
         try:
+            safety_note = self._safety_rejection(proposal)
+            if safety_note:
+                return self._reject_without_applying(proposal, baseline_error, safety_note)
             proposal.apply(self.darwin)
             candidate_error = _prediction_error(self.darwin, sample)
             improvement = baseline_error - candidate_error
@@ -155,7 +162,7 @@ class SelfModificationEngine:
         causal = self.darwin.causal_model
         current = causal.min_samples
         choices = []
-        if current > 2:
+        if current > self.MIN_CAUSAL_SAMPLES:
             new_value = current - 1
             choices.append((new_value, "lower min_samples for faster belief crystallization"))
         if current < 8:
@@ -185,7 +192,7 @@ class SelfModificationEngine:
         old_rate = self.darwin.exploration_rate
         proposals: list[ProposedModification] = []
         for delta, label in [(-0.05, "less exploration"), (0.05, "more exploration")]:
-            new_rate = max(0.0, min(0.6, old_rate + delta))
+            new_rate = max(self.MIN_EXPLORATION_RATE, min(0.6, old_rate + delta))
             if abs(new_rate - old_rate) < 1e-6:
                 continue
 
@@ -243,7 +250,7 @@ class SelfModificationEngine:
         current_curiosity = float(overrides.get("exploration_bias", 1.0))
         proposals: list[ProposedModification] = []
         for delta, label in [(-0.2, "reduce curiosity bias"), (0.2, "increase curiosity bias")]:
-            new_value = max(0.4, min(2.0, current_curiosity + delta))
+            new_value = max(self.MIN_CURIOSITY_BIAS, min(2.0, current_curiosity + delta))
             if abs(new_value - current_curiosity) < 1e-6:
                 continue
 
@@ -271,3 +278,33 @@ class SelfModificationEngine:
                 )
             )
         return proposals
+
+    def _safety_rejection(self, proposal: ProposedModification) -> str:
+        new_value = proposal.payload.get("new")
+        if proposal.kind == "causal.min_samples" and isinstance(new_value, int):
+            if new_value < self.MIN_CAUSAL_SAMPLES:
+                return f"rejected: causal.min_samples may not go below {self.MIN_CAUSAL_SAMPLES}"
+        if proposal.kind == "exploration.rate" and isinstance(new_value, (int, float)):
+            if float(new_value) < self.MIN_EXPLORATION_RATE:
+                return f"rejected: exploration rate may not go below {self.MIN_EXPLORATION_RATE:.2f}"
+        if proposal.kind == "planner.exploration_bias" and isinstance(new_value, (int, float)):
+            if float(new_value) < self.MIN_CURIOSITY_BIAS:
+                return f"rejected: curiosity bias may not go below {self.MIN_CURIOSITY_BIAS:.2f}"
+        return ""
+
+    def _reject_without_applying(
+        self,
+        proposal: ProposedModification,
+        baseline_error: float,
+        notes: str,
+    ) -> ModificationOutcome:
+        outcome = ModificationOutcome(
+            proposal=proposal,
+            accepted=False,
+            baseline_error=baseline_error,
+            candidate_error=baseline_error,
+            improvement=0.0,
+            notes=notes,
+        )
+        self.history.append(outcome)
+        return outcome

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 from darwin.causal import CausalModel
 from darwin.types import Action, Goal, State, Transition
@@ -75,13 +75,28 @@ class ExperimentEngine:
         actions: Iterable[Action],
         goal: Goal | None = None,
         limit: int = 5,
+        variable_filter: Callable[[str], bool] | None = None,
+        variable_filter_for_action: Callable[[Action, str], bool] | None = None,
     ) -> list[ExperimentProposal]:
         proposals: list[ExperimentProposal] = []
         for action in actions:
             prediction = self.causal_model.predict(state, action.name)
+            predicted_state = dict(prediction.state)
+            if variable_filter_for_action is not None:
+                predicted_state = {
+                    variable: value
+                    for variable, value in predicted_state.items()
+                    if variable_filter_for_action(action, variable)
+                }
+            elif variable_filter is not None:
+                predicted_state = {
+                    variable: value
+                    for variable, value in predicted_state.items()
+                    if variable_filter(variable)
+                }
             reward = self.causal_model.expected_reward(state, action.name)
             uncertainty = self.causal_model.uncertainty_for(state, action.name)
-            question = self._question_for(action, prediction.state, uncertainty)
+            question = self._question_for(action, predicted_state, uncertainty)
             rationale = (
                 f"uncertainty={uncertainty:.2f}, samples={self.causal_model.action_count(action.name)}, "
                 f"expected_reward={reward.mean:.2f}"
@@ -92,7 +107,7 @@ class ExperimentEngine:
                 ExperimentProposal(
                     action=action,
                     state=dict(state),
-                    predicted_state=prediction.state,
+                    predicted_state=predicted_state,
                     uncertainty=uncertainty,
                     expected_reward=reward.mean,
                     question=question,
@@ -121,4 +136,3 @@ class ExperimentEngine:
             return f"What does {action.name} actually cause from the current state?"
         changed = ", ".join(f"{key}={value!r}" for key, value in sorted(predicted_state.items())[:3])
         return f"Will {action.name} reliably produce {changed}?"
-

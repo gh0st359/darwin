@@ -135,6 +135,12 @@ class DiscoursePlanner:
     """Chooses what Darwin should try to communicate before wording it."""
 
     SOCIAL_MODES = {"greeting", "farewell", "small_talk", "identity"}
+    DOMAIN_TERMS = {
+        "math": {"math", "number", "numbers", "arithmetic", "addition", "subtract", "subtraction", "multiply", "zero"},
+        "space": {"space", "spatial", "block", "blocks", "motion", "move", "moving", "position", "push", "lift", "drop", "gravity"},
+        "room": {"room", "curtain", "curtains", "light", "bright", "brightness", "fuse", "switch", "circuit", "daylight"},
+        "time": {"time", "wait", "tick", "ticks", "pause"},
+    }
 
     def plan(
         self,
@@ -291,7 +297,13 @@ class DiscoursePlanner:
         claim_modes = {"belief_answer", "answer", "experiment", "self_report", "learn"}
         causal_claims: list[CausalClaim] = []
         if plan.mode in claim_modes:
-            for belief in darwin.causal_model.beliefs(limit=4):
+            domain = self._domain_from_plan_or_frame(plan, frame)
+            beliefs = (
+                self._beliefs_for_domain(darwin, domain, limit=4)
+                if domain
+                else darwin.causal_model.beliefs(limit=4)
+            )
+            for belief in beliefs:
                 causal_claims.append(
                     CausalClaim(
                         action=belief.action,
@@ -375,6 +387,7 @@ class DiscoursePlanner:
         focus_terms: set[str],
     ) -> ResponsePlan:
         top_items = packet.top(5)
+        domain = self._domain_from_focus_terms(focus_terms)
 
         if focus_terms & {"thinking", "mind", "thought", "thoughts", "reason", "reasoning"}:
             report = darwin.self_report()
@@ -393,12 +406,25 @@ class DiscoursePlanner:
                 confidence=max(0.35, frame.confidence),
             )
 
-        if focus_terms & {"belief", "beliefs", "believe", "know", "knowing"}:
-            beliefs = darwin.causal_model.beliefs(limit=4)
+        if domain and focus_terms & {"belief", "beliefs", "believe", "know", "knowing", "learned", "learn"}:
+            beliefs = self._beliefs_for_domain(darwin, domain, limit=4)
             # Do NOT pre-render beliefs into answer_points; the composer
             # will build prose from the causal_claims that _enrich_plan
             # attaches. That keeps belief_answer output free of robotic
             # "Under always, X changes Y as None -> True" lines.
+            return ResponsePlan(
+                mode="belief_answer",
+                intent=f"answer from {domain} causal beliefs",
+                thesis="The strongest answer should come from learned intervention traces.",
+                answer_points=[] if beliefs else ["I don't have enough direct experience yet to say."],
+                evidence=[f"domain::{domain}"],
+                retrieved_used=packet.top(2),
+                confidence=0.6 if beliefs else 0.25,
+                target_length="medium",
+            )
+
+        if focus_terms & {"belief", "beliefs", "believe", "know", "knowing", "learned", "learn"}:
+            beliefs = darwin.causal_model.beliefs(limit=4)
             return ResponsePlan(
                 mode="belief_answer",
                 intent="answer from causal beliefs",
@@ -415,10 +441,11 @@ class DiscoursePlanner:
                 adapter.possible_actions(),
                 goal=goal,
                 limit=2,
+                variable_filter_for_action=self._variable_filter_for_adapter_action(adapter),
             )
             return self._experiment_plan(proposals, packet, frame)
 
-        if focus_terms & {"goal", "goals", "value", "values", "important", "learned"}:
+        if focus_terms & {"goal", "goals", "value", "values", "important"}:
             points = []
             if packet.active_goals:
                 points.append(
@@ -628,7 +655,59 @@ class DiscoursePlanner:
     def _focus_terms(self, frame: SemanticFrame) -> set[str]:
         terms = {term.lower() for term in frame.tokens if len(term) > 2}
         terms.update(grounding.text.lower() for grounding in frame.groundings)
+        for grounding in frame.groundings:
+            terms.add(grounding.name.lower())
+            terms.update(
+                part
+                for part in grounding.name.replace("/", " ").replace(".", " ").replace("_", " ").lower().split()
+                if len(part) > 2
+            )
         return terms
+
+    def _domain_from_focus_terms(self, focus_terms: set[str]) -> str | None:
+        for domain, terms in self.DOMAIN_TERMS.items():
+            if domain in focus_terms or focus_terms & terms:
+                return domain
+        return None
+
+    def _domain_from_plan_or_frame(self, plan: ResponsePlan, frame: SemanticFrame) -> str | None:
+        for item in plan.evidence:
+            if item.startswith("domain::"):
+                domain = item.split("::", 1)[1].strip()
+                if domain:
+                    return domain
+        return self._domain_from_focus_terms(self._focus_terms(frame))
+
+    def _beliefs_for_domain(self, darwin: Any, domain: str, limit: int = 4) -> list[Any]:
+        prefix = f"{domain}."
+        action_prefix = f"{domain}/"
+        beliefs = []
+        seen: set[tuple[str, str]] = set()
+        for belief in darwin.causal_model.beliefs(limit=80):
+            if not (belief.action.startswith(action_prefix) or belief.variable.startswith(prefix)):
+                continue
+            key = (belief.action, belief.variable)
+            if key in seen:
+                continue
+            seen.add(key)
+            beliefs.append(belief)
+            if len(beliefs) >= limit:
+                break
+        return beliefs
+
+    def _variable_filter_for_adapter_action(self, adapter: Any) -> Any:
+        variable_finder = getattr(adapter, "variables_for_domain", None)
+        if not callable(variable_finder):
+            return None
+
+        def include(action: Any, variable: str) -> bool:
+            domain = str(getattr(action, "metadata", {}).get("domain", ""))
+            if not domain:
+                return True
+            variables = set(variable_finder(domain))
+            return variable in variables if variables else True
+
+        return include
 
     def _reason_from_memory(self, content: str) -> str:
         if not content:

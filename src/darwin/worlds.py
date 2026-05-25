@@ -293,6 +293,10 @@ class UniverseSimulation:
                 }
         return {"scope": "world", "world": "universe", "domain": "universe"}
 
+    def variables_for_domain(self, domain: str) -> list[str]:
+        prefix = f"{domain}."
+        return sorted(key for key in self.state if key.startswith(prefix))
+
     def actions_for_terms(self, terms: set[str]) -> list[Action]:
         if not terms:
             return []
