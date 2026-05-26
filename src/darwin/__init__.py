@@ -4,7 +4,9 @@ from darwin.agent import Darwin
 from darwin.causal_chain import CausalChain, CausalChainEngine, CausalGraph
 from darwin.discourse import CausalClaim, ReferencedExperience, ResponsePlan, UncertaintyLevel
 from darwin.dlm import DLMRenderResult, DarwinLanguageModule, GemmaDLM, StubDLM, gemma_dlm_available
+from darwin.generative import GenerativeUniverse, GenerativeUniverseAdapter, WorldSpec
 from darwin.instrumentation import BackgroundLogEntry, PlanLogEntry, StructuredLogger
+from darwin.knowledge import CorpusIngestor, KnowledgeAtom, KnowledgeGraph
 from darwin.retrieval import RetrievalPacket, RetrievedMemory
 from darwin.runtime import DarwinRuntime
 from darwin.self_modification import ModificationOutcome, ProposedModification, SelfModificationEngine
@@ -20,12 +22,17 @@ __all__ = [
     "CausalChainEngine",
     "CausalClaim",
     "CausalGraph",
+    "CorpusIngestor",
     "Darwin",
     "DarwinLanguageModule",
     "DarwinRuntime",
     "DLMRenderResult",
     "GemmaDLM",
+    "GenerativeUniverse",
+    "GenerativeUniverseAdapter",
     "Goal",
+    "KnowledgeAtom",
+    "KnowledgeGraph",
     "ModificationOutcome",
     "PlanLogEntry",
     "ProposedModification",
@@ -43,5 +50,6 @@ __all__ = [
     "TrainingPair",
     "Transition",
     "UncertaintyLevel",
+    "WorldSpec",
     "gemma_dlm_available",
 ]

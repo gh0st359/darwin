@@ -226,6 +226,10 @@ class DarwinRuntime:
                     }),
                 )
                 self.darwin.learn(transition)
+                if self.store is not None:
+                    provenance_ids = list(transition.metadata.get("provenance_ids", []))
+                    if provenance_ids:
+                        self.store.promote_knowledge_atoms(provenance_ids, support_kind="generated_experiment")
                 result = self.darwin.experiment_engine.evaluate(proposal, transition)
                 if self.store is not None:
                     self.store.record_experiment(result.to_record())

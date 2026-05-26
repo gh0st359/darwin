@@ -281,6 +281,99 @@ class PersistentStore:
             connection.commit()
             return int(cursor.lastrowid)
 
+    def record_knowledge_atom(self, atom: Mapping[str, Any]) -> int:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                insert or ignore into knowledge_atoms(
+                    atom_id, kind, subject, relation, object, confidence,
+                    promoted, support_kind, provenance, payload, created_at
+                )
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
+                """,
+                (
+                    atom["atom_id"],
+                    atom["kind"],
+                    atom["subject"],
+                    atom["relation"],
+                    atom["object"],
+                    float(atom.get("confidence", 0.0)),
+                    1 if atom.get("promoted") else 0,
+                    atom.get("support_kind", "corpus"),
+                    dumps(atom.get("provenance", {})),
+                    dumps(dict(atom)),
+                ),
+            )
+            connection.commit()
+            return 1 if cursor.rowcount > 0 else 0
+
+    def load_knowledge_atoms(self, limit: int | None = None) -> list[dict[str, Any]]:
+        sql = """
+            select atom_id, kind, subject, relation, object, confidence,
+                   promoted, support_kind, provenance, payload, created_at
+            from knowledge_atoms
+            order by id asc
+        """
+        params: tuple[Any, ...] = ()
+        if limit is not None:
+            sql += " limit ?"
+            params = (limit,)
+        with self._connect() as connection:
+            rows = connection.execute(sql, params).fetchall()
+        records: list[dict[str, Any]] = []
+        for row in rows:
+            payload = loads(row["payload"])
+            payload["promoted"] = bool(row["promoted"])
+            payload["support_kind"] = row["support_kind"]
+            payload["provenance"] = loads(row["provenance"])
+            records.append(payload)
+        return records
+
+    def promote_knowledge_atoms(self, atom_ids: list[str], support_kind: str = "generated_experiment") -> int:
+        if not atom_ids:
+            return 0
+        with self._connect() as connection:
+            count = 0
+            for atom_id in atom_ids:
+                cursor = connection.execute(
+                    """
+                    update knowledge_atoms
+                    set promoted = 1, support_kind = ?
+                    where atom_id = ?
+                    """,
+                    (support_kind, atom_id),
+                )
+                count += int(cursor.rowcount)
+            connection.commit()
+            return count
+
+    def record_world_spec(self, spec: Mapping[str, Any], status: str = "candidate") -> int:
+        name = str(spec["name"])
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                insert into world_specs(name, status, payload, created_at)
+                values (?, ?, ?, current_timestamp)
+                on conflict(name) do update set
+                    status = excluded.status,
+                    payload = excluded.payload
+                """,
+                (name, status, dumps(dict(spec))),
+            )
+            connection.commit()
+            return int(cursor.lastrowid or 0)
+
+    def load_world_specs(self, status: str | None = None) -> list[dict[str, Any]]:
+        sql = "select name, status, payload, created_at from world_specs"
+        params: tuple[Any, ...] = ()
+        if status is not None:
+            sql += " where status = ?"
+            params = (status,)
+        sql += " order by id asc"
+        with self._connect() as connection:
+            rows = connection.execute(sql, params).fetchall()
+        return [loads(row["payload"]) for row in rows]
+
     def recent_self_modifications(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._connect() as connection:
             rows = connection.execute(
@@ -314,6 +407,11 @@ class PersistentStore:
             "plans",
             "semantic_frames",
             "self_modifications",
+            "knowledge_atoms",
+            "world_specs",
+            "generated_experiments",
+            "validation_results",
+            "research_events",
         ]
         with self._connect() as connection:
             return {
@@ -414,8 +512,57 @@ class PersistentStore:
                     payload text not null,
                     created_at text not null
                 );
+
+                create table if not exists knowledge_atoms (
+                    id integer primary key autoincrement,
+                    atom_id text not null unique,
+                    kind text not null,
+                    subject text not null,
+                    relation text not null,
+                    object text not null,
+                    confidence real not null,
+                    promoted integer not null default 0,
+                    support_kind text not null,
+                    provenance text not null,
+                    payload text not null,
+                    created_at text not null
+                );
+
+                create table if not exists world_specs (
+                    id integer primary key autoincrement,
+                    name text not null unique,
+                    status text not null,
+                    payload text not null,
+                    created_at text not null
+                );
+
+                create table if not exists generated_experiments (
+                    id integer primary key autoincrement,
+                    world_name text not null,
+                    action text not null,
+                    provenance_ids text not null,
+                    payload text not null,
+                    created_at text not null
+                );
+
+                create table if not exists validation_results (
+                    id integer primary key autoincrement,
+                    target text not null,
+                    valid integer not null,
+                    payload text not null,
+                    created_at text not null
+                );
+
+                create table if not exists research_events (
+                    id integer primary key autoincrement,
+                    status text not null,
+                    url text not null,
+                    payload text not null,
+                    created_at text not null
+                );
                 """
             )
+            connection.execute("pragma journal_mode=WAL")
             columns = {
                 row["name"]
                 for row in connection.execute("pragma table_info(transitions)").fetchall()

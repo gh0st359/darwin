@@ -8,7 +8,11 @@ from pathlib import Path
 from darwin.agent import Darwin
 from darwin.dlm import GemmaDLM, StubDLM, gemma_dlm_available
 from darwin.embodiment import RoomSimulationAdapter, UniverseSimulationAdapter
+from darwin.generative import ActionSpec, GenerativeUniverse, GenerativeUniverseAdapter, RuleSpec, WorldSpec, WorldSpecGenerator
 from darwin.instrumentation import StructuredLogger
+from darwin.kernel import ActorScheduler
+from darwin.knowledge import CorpusIngestor, KnowledgeGraph
+from darwin.research import LiveResearcher
 from darwin.runtime import DarwinRuntime, ensure_chat_action
 from darwin.server import DEFAULT_HOST, DEFAULT_PORT, DarwinClient, DarwinDaemon, PortInUseError
 from darwin.streaming import StreamingSpeaker
@@ -59,6 +63,9 @@ def main(argv: list[str] | None = None) -> int:
     brain_parser.add_argument("--interval", type=float, default=3.0)
     brain_parser.add_argument("--host", default=DEFAULT_HOST)
     brain_parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    brain_parser.add_argument("--kernel", choices=["v3", "v4"], default="v3")
+    brain_parser.add_argument("--workers", default="auto")
+    brain_parser.add_argument("--accelerator", default="auto")
     brain_parser.add_argument(
         "--dlm", choices=["stub", "gemma"], default="stub",
     )
@@ -102,6 +109,14 @@ def main(argv: list[str] | None = None) -> int:
     export_parser.add_argument("--min-quality", type=float, default=0.7)
     export_parser.add_argument("--renderer", default=None)
 
+    ingest_parser = subparsers.add_parser(
+        "ingest-corpus",
+        help="Ingest a curated offline corpus into Darwin's v4 knowledge graph.",
+    )
+    ingest_parser.add_argument("--source", choices=["wikipedia", "wikidata", "wikidump"], required=True)
+    ingest_parser.add_argument("--path", type=Path, required=True)
+    ingest_parser.add_argument("--memory", type=Path, default=Path("darwin_memory.sqlite3"))
+
     args = parser.parse_args(argv)
     if args.command == "run":
         return run_room(args.steps, args.seed, args.exploration)
@@ -131,6 +146,9 @@ def main(argv: list[str] | None = None) -> int:
             args.dlm_backend,
             args.dlm_model,
             not args.quiet,
+            args.kernel,
+            args.workers,
+            args.accelerator,
         )
     if args.command == "connect":
         return connect(
@@ -141,7 +159,24 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "export-training":
         return export_training(args.source, args.destination, args.min_quality, args.renderer)
+    if args.command == "ingest-corpus":
+        return ingest_corpus(args.source, args.path, args.memory)
     return 1
+
+
+def ingest_corpus(source: str, path: Path, memory_path: Path) -> int:
+    store = PersistentStore(memory_path)
+    source_type = "wikipedia" if source == "wikidump" else source
+    result = CorpusIngestor(store=store).ingest(path, source_type=source_type)
+    graph = KnowledgeGraph.from_store(store)
+    specs = WorldSpecGenerator().generate(graph)
+    for spec in specs:
+        store.record_world_spec(spec.to_record(), status="candidate")
+    print(
+        f"ingested {result.atoms_created} knowledge atoms from {path} "
+        f"and generated {len(specs)} sandbox world specs"
+    )
+    return 0
 
 
 def export_training(source: Path, destination: Path, min_quality: float, renderer: str | None) -> int:
@@ -163,12 +198,18 @@ def brain(
     dlm_backend: str,
     dlm_model: str,
     print_events: bool,
+    kernel: str = "v3",
+    workers: str = "auto",
+    accelerator: str = "auto",
 ) -> int:
     """Run Darwin as a 24/7 daemon. No stdin loop; clients attach over TCP."""
 
-    universe = UniverseSimulation(seed=seed)
-    adapter = UniverseSimulationAdapter(universe)
     store = PersistentStore(memory_path)
+    if kernel == "v4":
+        adapter = _build_v4_adapter(store)
+    else:
+        universe = UniverseSimulation(seed=seed)
+        adapter = UniverseSimulationAdapter(universe)
     actions = ensure_chat_action(adapter.possible_actions())
     goal = Goal(
         desired={"room.room_bright": True, "room.fuse_intact": True, "space.a.y": 0},
@@ -207,11 +248,15 @@ def brain(
         dlm=dlm,
         training_collector=TrainingDataCollector(),
     )
+    if kernel == "v4":
+        runtime.kernel_scheduler = ActorScheduler(workers=workers, accelerator=accelerator)
+        runtime.kernel_mode = "v4"
     daemon = DarwinDaemon(runtime, host=host, port=port)
 
     print("Project Darwin brain")
     print(f"memory={memory_path}")
     print(f"embodiment={adapter.name}")
+    print(f"kernel={kernel}")
     print(f"dlm={dlm.name}")
     print(f"listening on {host}:{port}")
     print(f"background loops: {', '.join(runtime.loop_intervals)}")
@@ -224,6 +269,41 @@ def brain(
         return 2
     print("brain stopped.")
     return 0
+
+
+def _build_v4_adapter(store: PersistentStore) -> GenerativeUniverseAdapter:
+    records = store.load_world_specs()
+    specs = [WorldSpec.from_record(record) for record in records]
+    if not specs:
+        graph = KnowledgeGraph.from_store(store)
+        specs = WorldSpecGenerator().generate(graph)
+        for spec in specs:
+            store.record_world_spec(spec.to_record(), status="candidate")
+    if not specs:
+        specs = [_bootstrap_v4_world_spec()]
+    return GenerativeUniverseAdapter(GenerativeUniverse.from_specs(specs))
+
+
+def _bootstrap_v4_world_spec() -> WorldSpec:
+    return WorldSpec(
+        name="generated/curiosity_bootstrap",
+        description="Data-only bootstrap world used until a curated corpus is ingested.",
+        concepts=["curiosity", "observation", "knowledge"],
+        initial_state={"curiosity.knowledge": 0.0, "curiosity.observations": 0},
+        actions=[
+            ActionSpec(
+                name="generated/observe_pattern",
+                description="Create one more grounded observation.",
+                rules=[
+                    RuleSpec(variable="curiosity.knowledge", operation="add", operand=1.0),
+                    RuleSpec(variable="curiosity.observations", operation="add", operand=1),
+                ],
+                vocabulary=["curiosity", "observation", "knowledge"],
+                provenance_ids=[],
+            )
+        ],
+        provenance_ids=[],
+    )
 
 
 def connect(host: str, port: int, watch_events: bool, text_delay: float) -> int:
@@ -334,6 +414,12 @@ def _print_remote_help() -> None:
                 "/beliefs       show strongest causal beliefs",
                 "/beliefs DOMAIN  show beliefs for one universe domain",
                 "/universe      show the active embodiment domains",
+                "/worlds        show generated v4 world specs",
+                "/knowledge Q   query the v4 knowledge graph",
+                "/hypotheses    show corpus and causal hypotheses",
+                "/mind          show kernel/introspection state",
+                "/research status show dormant live research status",
+                "/why ID        explain belief or knowledge provenance",
                 "/concepts      show concept hierarchy",
                 "/experiments   show active experiment proposals",
                 "/think         run one cognition cycle now",

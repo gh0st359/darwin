@@ -327,7 +327,7 @@ class DiscoursePlanner:
         ]
 
         levels: list[UncertaintyLevel] = []
-        if frame.confidence < 0.45 and plan.mode not in {"conversation", "clarify"}:
+        if frame.confidence < 0.45 and plan.mode not in {"conversation", "clarify", "knowledge_answer"}:
             levels.append(
                 UncertaintyLevel(
                     target="interpretation",
@@ -388,6 +388,29 @@ class DiscoursePlanner:
     ) -> ResponsePlan:
         top_items = packet.top(5)
         domain = self._domain_from_focus_terms(focus_terms)
+        knowledge_hits = self._knowledge_hits(darwin, frame.original_text)
+
+        if knowledge_hits and focus_terms & {"know", "knowing", "belief", "beliefs", "learned", "understand"}:
+            points = [
+                f"{atom.subject} {atom.relation} {atom.object}"
+                + (f" (source: {atom.provenance.source_type})" if atom.provenance.source_type else "")
+                for atom in knowledge_hits[:4]
+            ]
+            evidence = [f"knowledge_atom::{atom.atom_id}" for atom in knowledge_hits[:4]]
+            if any(atom.promoted for atom in knowledge_hits):
+                evidence.append("support::validated")
+            else:
+                evidence.append("support::corpus_hypothesis")
+            return ResponsePlan(
+                mode="knowledge_answer",
+                intent="answer from unified knowledge graph",
+                thesis="Answer from provenance-backed knowledge atoms before falling back to old domains.",
+                answer_points=points,
+                evidence=evidence,
+                retrieved_used=packet.top(2),
+                confidence=max(0.45, min(0.75, knowledge_hits[0].confidence)),
+                target_length="medium",
+            )
 
         if focus_terms & {"thinking", "mind", "thought", "thoughts", "reason", "reasoning"}:
             report = darwin.self_report()
@@ -708,6 +731,17 @@ class DiscoursePlanner:
             return variable in variables if variables else True
 
         return include
+
+    def _knowledge_hits(self, darwin: Any, query: str) -> list[Any]:
+        store = getattr(darwin, "store", None)
+        if store is None:
+            return []
+        try:
+            from darwin.knowledge import KnowledgeGraph
+
+            return KnowledgeGraph.from_store(store).search(query, limit=6)
+        except Exception:
+            return []
 
     def _reason_from_memory(self, content: str) -> str:
         if not content:

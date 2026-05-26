@@ -358,6 +358,108 @@ class DarwinDaemon:
                 domain_variables = [key for key in state if key.startswith(f"{domain}.")]
                 out.append(f"- {domain}: actions={len(domain_actions)} variables={len(domain_variables)}")
             return out
+        if head == "/worlds":
+            adapter = runtime.adapter
+            specs = []
+            if runtime.store is not None:
+                try:
+                    specs = runtime.store.load_world_specs()
+                except Exception:
+                    specs = []
+            out = [
+                f"embodiment={getattr(adapter, 'name', 'unknown')}",
+                f"generated_world_specs={len(specs)}",
+                f"actions={len(adapter.possible_actions())} variables={len(adapter.observe())}",
+            ]
+            for spec in specs[:12]:
+                out.append(f"- {spec.get('name')} concepts={len(spec.get('concepts', []))}")
+            return out
+        if head == "/knowledge":
+            query = command.removeprefix("/knowledge").strip()
+            if runtime.store is None:
+                return ["No persistent knowledge graph is attached."]
+            try:
+                from darwin.knowledge import KnowledgeGraph
+
+                graph = KnowledgeGraph.from_store(runtime.store)
+                atoms = graph.search(query or " ".join(parts[1:]), limit=12) if query else graph.atoms[:12]
+            except Exception as exc:
+                return [f"knowledge graph unavailable: {exc!r}"]
+            if not atoms:
+                return ["No knowledge atoms matched."]
+            return [
+                (
+                    f"- {atom.kind} {atom.subject} {atom.relation} {atom.object} "
+                    f"conf={atom.confidence:.2f} promoted={atom.promoted} source={atom.provenance.source_type}"
+                )
+                for atom in atoms
+            ]
+        if head == "/hypotheses":
+            hypotheses = runtime.darwin.world_model.hypotheses(runtime.darwin.causal_model, limit=8)
+            if runtime.store is not None:
+                try:
+                    from darwin.knowledge import KnowledgeGraph
+
+                    for atom in KnowledgeGraph.from_store(runtime.store).causal_hypotheses()[:8]:
+                        hypotheses.append(
+                            type("CorpusHypothesis", (), {
+                                "name": f"corpus:{atom.atom_id}",
+                                "description": f"{atom.subject} {atom.relation} {atom.object}",
+                                "confidence": atom.confidence,
+                                "evidence": 1,
+                            })()
+                        )
+                except Exception:
+                    pass
+            if not hypotheses:
+                return ["No hypotheses yet."]
+            return [
+                f"- {item.name} conf={item.confidence:.2f} evidence={item.evidence}: {item.description}"
+                for item in hypotheses[:12]
+            ]
+        if head == "/mind":
+            lines = list(runtime.darwin.self_report().lines())
+            scheduler = getattr(runtime, "kernel_scheduler", None)
+            if scheduler is not None:
+                lines.append(f"kernel=v4 workers={scheduler.workers} accelerator={scheduler.accelerator}")
+                lines.append(f"kernel_metrics={scheduler.metrics.to_record()}")
+            else:
+                lines.append("kernel=v3")
+            return lines
+        if head == "/research":
+            try:
+                from darwin.research import LiveResearcher
+
+                status = LiveResearcher().status()
+            except Exception as exc:
+                return [f"research status unavailable: {exc!r}"]
+            return [f"{key}={value}" for key, value in status.items()]
+        if head == "/why":
+            target = " ".join(parts[1:]).strip()
+            if not target:
+                return ["Usage: /why BELIEF_OR_ATOM_ID"]
+            if runtime.store is not None:
+                try:
+                    from darwin.knowledge import KnowledgeGraph
+
+                    for atom in KnowledgeGraph.from_store(runtime.store).atoms:
+                        if atom.atom_id == target or target.lower() in atom.text.lower():
+                            return [
+                                f"{atom.subject} {atom.relation} {atom.object}",
+                                f"source={atom.provenance.source_type}:{atom.provenance.source_id}",
+                                f"extractor={atom.provenance.extractor} promoted={atom.promoted} support={atom.support_kind}",
+                            ]
+                except Exception:
+                    pass
+            beliefs = runtime.darwin.causal_model.beliefs(limit=50)
+            for belief in beliefs:
+                label = f"{belief.action}->{belief.variable}"
+                if target in label:
+                    return [
+                        f"{label} {belief.effect}",
+                        f"condition={belief.condition} confidence={belief.confidence:.2f} samples={belief.samples}",
+                    ]
+            return [f"No provenance found for {target!r}."]
         if head == "/concepts":
             return [
                 f"- L{c.level} {c.kind}: {c.name} support={c.support} rmean={c.reward_mean:.2f}"
