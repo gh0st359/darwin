@@ -1,0 +1,18 @@
+flowchart TB
+    subgraph V3["v3 UniverseSimulation"]
+        V3World["hand-built adapters<br/>room / math / space / time"]
+        V3Actions["fixed action set"]
+        V3State["fixed state variables"]
+    end
+
+    subgraph V4["v4 GenerativeUniverse"]
+        V4Atoms["KnowledgeAtom records"]
+        V4Specs["WorldSpec records"]
+        V4Compiler["SandboxedWorldCompiler"]
+        V4Adapter["GenerativeUniverseAdapter"]
+    end
+
+    Kernel["same Darwin symbolic/causal kernel"]
+
+    V3World --> V3Actions --> V3State --> Kernel
+    V4Atoms --> V4Specs --> V4Compiler --> V4Adapter --> Kernel

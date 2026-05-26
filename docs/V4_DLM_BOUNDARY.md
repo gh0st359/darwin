@@ -10,34 +10,7 @@ invent missing support, or narrate unsupported causal reasoning.
 
 ## Ownership boundary
 
-```mermaid
-flowchart LR
-    subgraph Kernel["Darwin symbolic/causal kernel owns reasoning"]
-        Knowledge["KnowledgeGraph"]
-        Causal["CausalModel"]
-        World["WorldModel"]
-        Runtime["DarwinRuntime"]
-        Discourse["DiscoursePlanner"]
-    end
-
-    Plan["ResponsePlan<br/>closed structured payload"]
-
-    subgraph Mouth["DLM/Gemma owns wording only"]
-        Gemma["GemmaDLM"]
-        Stub["StubDLM / composer"]
-    end
-
-    Validator["FaithfulnessValidator<br/>rejects drift"]
-    Critic["ResponseCritic<br/>Darwin-side critique"]
-    User["user"]
-
-    Knowledge --> Discourse
-    Causal --> Discourse
-    World --> Discourse
-    Runtime --> Discourse
-    Discourse --> Plan --> Gemma --> Validator --> Critic --> User
-    Plan --> Stub --> Validator
-```
+![V4_Dlm_Boundary 01](diagrams/v4_dlm_boundary-01.svg)
 
 The DLM never receives hidden runtime state or raw thought traces as an open
 prompt. It receives `ResponsePlan.to_dlm_payload()`, a strictly shaped object.
@@ -79,21 +52,7 @@ The DLM payload intentionally excludes hidden state and raw trace internals.
 
 ## Rejection flow
 
-```mermaid
-flowchart TB
-    Plan["ResponsePlan"]
-    Render["GemmaDLM.render(plan)"]
-    Output["candidate prose"]
-    Validate["FaithfulnessValidator.validate(plan, text)"]
-    Valid{"valid?"}
-    Critique["ResponseCritic.evaluate"]
-    User["send to user"]
-    Fallback["NaturalLanguageComposer fallback"]
-
-    Plan --> Render --> Output --> Validate --> Valid
-    Valid -->|yes| Critique --> User
-    Valid -->|no| Fallback --> Critique
-```
+![V4_Dlm_Boundary 02](diagrams/v4_dlm_boundary-02.svg)
 
 Validator rejection can happen when the renderer:
 
@@ -131,13 +90,7 @@ The DLM may render that in natural language, but it cannot add:
 
 ## Why this is not a prompt chain
 
-```mermaid
-flowchart LR
-    PromptChain["prompt chain<br/>text in -> model decides -> text out"]
-    Darwin["Darwin v4<br/>state/action transition -> causal kernel -> ResponsePlan -> renderer"]
-
-    PromptChain -. "not the architecture" .-> Darwin
-```
+![V4_Dlm_Boundary 03](diagrams/v4_dlm_boundary-03.svg)
 
 The language model is not asked "what should Darwin think?" The kernel has
 already selected the structure of the response. The model is asked only to

@@ -1,0 +1,5 @@
+flowchart LR
+    PromptChain["prompt chain<br/>text in -> model decides -> text out"]
+    Darwin["Darwin v4<br/>state/action transition -> causal kernel -> ResponsePlan -> renderer"]
+
+    PromptChain -. "not the architecture" .-> Darwin

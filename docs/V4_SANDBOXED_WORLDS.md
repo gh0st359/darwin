@@ -21,21 +21,7 @@ Implemented in `src/darwin/generative.py`.
 
 ## World generation path
 
-```mermaid
-flowchart LR
-    Atom["KnowledgeAtom<br/>kind=causal_hypothesis"]
-    Generator["WorldSpecGenerator"]
-    Spec["WorldSpec<br/>name, concepts, initial_state, actions, provenance_ids"]
-    Compiler["SandboxedWorldCompiler.validate"]
-    Adapter["SandboxedGeneratedAdapter"]
-    Universe["GenerativeUniverse"]
-    EnvAdapter["GenerativeUniverseAdapter"]
-    Runtime["DarwinRuntime"]
-
-    Atom --> Generator --> Spec --> Compiler
-    Compiler -->|valid| Adapter --> Universe --> EnvAdapter --> Runtime
-    Compiler -->|invalid| Reject["reject before activation"]
-```
+![V4_Sandboxed_Worlds 01](diagrams/v4_sandboxed_worlds-01.svg)
 
 ## `WorldSpec`
 
@@ -85,32 +71,7 @@ controlled transition; it is not a physics engine.
 - rule operations are not in `add`, `set`, `toggle`
 - `add` operands are not numeric
 
-```mermaid
-flowchart TB
-    Spec["WorldSpec"]
-    Code{"contains_code?"}
-    Trust{"trust_level == sandboxed?"}
-    Actions{"has actions?"}
-    Names{"valid variable names?"}
-    Prefix{"actions start generated/?"}
-    Ops{"ops in add/set/toggle?"}
-    Valid["compile to SandboxedGeneratedAdapter"]
-    Invalid["ValidationResult(valid=false, errors=[...])"]
-
-    Spec --> Code
-    Code -->|yes| Invalid
-    Code -->|no| Trust
-    Trust -->|no| Invalid
-    Trust -->|yes| Actions
-    Actions -->|no| Invalid
-    Actions -->|yes| Names
-    Names -->|no| Invalid
-    Names -->|yes| Prefix
-    Prefix -->|no| Invalid
-    Prefix -->|yes| Ops
-    Ops -->|no| Invalid
-    Ops -->|yes| Valid
-```
+![V4_Sandboxed_Worlds 02](diagrams/v4_sandboxed_worlds-02.svg)
 
 ## Adapter protocol
 
@@ -133,21 +94,7 @@ It also exposes helpers used by the v4 runtime and CLI:
 
 ## Belief promotion in generated worlds
 
-```mermaid
-sequenceDiagram
-    participant R as DarwinRuntime
-    participant A as GenerativeUniverseAdapter
-    participant D as Darwin kernel
-    participant S as PersistentStore
-
-    R->>A: possible_actions()
-    A-->>R: generated action with provenance_ids
-    R->>A: apply(action)
-    A-->>R: after_state, reward
-    R->>D: learn(Transition)
-    D-->>R: causal model updates
-    R->>S: promote_knowledge_atoms(provenance_ids, "generated_experiment")
-```
+![V4_Sandboxed_Worlds 03](diagrams/v4_sandboxed_worlds-03.svg)
 
 Promotion means the atom's provenance now has generated-experiment support. It
 does not mean Darwin has solved the real-world domain. It means Darwin has
@@ -157,23 +104,7 @@ observed support inside the sandbox generated from that hypothesis.
 
 `darwin brain --kernel v4` calls `_build_v4_adapter(store)`:
 
-```mermaid
-flowchart TB
-    Start["v4 brain startup"]
-    Load["load_world_specs()"]
-    HasSpecs{"specs exist?"}
-    BuildGraph["KnowledgeGraph.from_store"]
-    Generate["WorldSpecGenerator.generate"]
-    HasGenerated{"generated specs exist?"}
-    Bootstrap["generated/curiosity_bootstrap"]
-    Adapter["GenerativeUniverseAdapter"]
-
-    Start --> Load --> HasSpecs
-    HasSpecs -->|yes| Adapter
-    HasSpecs -->|no| BuildGraph --> Generate --> HasGenerated
-    HasGenerated -->|yes| Adapter
-    HasGenerated -->|no| Bootstrap --> Adapter
-```
+![V4_Sandboxed_Worlds 04](diagrams/v4_sandboxed_worlds-04.svg)
 
 If memory is empty, Darwin starts with a tiny `generated/curiosity_bootstrap`
 world so the brain can still run. That bootstrap world is a placeholder, not a

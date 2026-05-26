@@ -1,0 +1,11 @@
+flowchart LR
+    Kernel["Darwin kernel<br/>owns reasoning"]
+    Plan["ResponsePlan<br/>closed structured payload"]
+    Gemma["Gemma / DLM<br/>renders prose only"]
+    Validator["FaithfulnessValidator<br/>rejects unsupported output"]
+    Composer["deterministic composer fallback"]
+    User["user"]
+
+    Kernel --> Plan --> Gemma --> Validator
+    Validator -->|valid| User
+    Validator -->|invalid| Composer --> User

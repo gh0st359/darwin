@@ -1,0 +1,12 @@
+flowchart LR
+    File["local corpus file"]
+    Source["source type<br/>wikipedia | wikidata | wikidump"]
+    Ingestor["CorpusIngestor.ingest"]
+    Extract["deterministic extractor"]
+    Atom["KnowledgeAtom"]
+    Store["PersistentStore.record_knowledge_atom"]
+    Graph["KnowledgeGraph.from_store"]
+    Specs["WorldSpecGenerator.generate"]
+    WorldStore["PersistentStore.record_world_spec"]
+
+    File --> Source --> Ingestor --> Extract --> Atom --> Store --> Graph --> Specs --> WorldStore

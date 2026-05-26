@@ -29,18 +29,7 @@ agency, and human-facing interaction.
 
 ## v4 generative universe addendum
 
-```mermaid
-flowchart LR
-    Corpus["curated corpus"]
-    Atoms["KnowledgeAtom + Provenance"]
-    Graph["KnowledgeGraph"]
-    Specs["WorldSpecGenerator"]
-    Compiler["SandboxedWorldCompiler"]
-    Adapter["GenerativeUniverseAdapter"]
-    Kernel["same Darwin symbolic/causal kernel"]
-
-    Corpus --> Atoms --> Graph --> Specs --> Compiler --> Adapter --> Kernel
-```
+![v4 generative universe addendum](diagrams/docs-architecture-01.svg)
 
 In v4, `darwin brain --kernel v4` uses generated sandbox worlds instead of the
 hand-built `UniverseSimulation` adapter. The runtime, causal model, discourse

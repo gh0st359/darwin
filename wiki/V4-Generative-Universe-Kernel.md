@@ -10,21 +10,7 @@ plans into prose.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    Corpus["curated corpus<br/>wikipedia | wikidata | wikidump"]
-    Atoms["KnowledgeAtoms<br/>definition / relation / quantity / alias / causal hypothesis"]
-    Graph["KnowledgeGraph"]
-    Generator["WorldSpecGenerator"]
-    Compiler["SandboxedWorldCompiler"]
-    Adapter["GenerativeUniverseAdapter"]
-    Runtime["Darwin Runtime"]
-    Plan["ResponsePlan"]
-    DLM["DLM / Gemma<br/>mouth only"]
-    User["user"]
-
-    Corpus --> Atoms --> Graph --> Generator --> Compiler --> Adapter --> Runtime --> Plan --> DLM --> User
-```
+![V4 Generative Universe Kernel 01](../docs/diagrams/v4-generative-universe-kernel-01.svg)
 
 ## What exists now
 
@@ -40,24 +26,7 @@ flowchart LR
 
 ## What v4 changes
 
-```mermaid
-flowchart TB
-    subgraph V3["v3 UniverseSimulation"]
-        Fixed["hand-built room/math/space/time domains"]
-    end
-
-    subgraph V4["v4 GenerativeUniverse"]
-        Corpus["curated corpus"]
-        Atoms["KnowledgeAtoms"]
-        Specs["WorldSpecs"]
-        Worlds["sandbox generated worlds"]
-    end
-
-    Kernel["same Darwin symbolic/causal kernel"]
-
-    Fixed --> Kernel
-    Corpus --> Atoms --> Specs --> Worlds --> Kernel
-```
+![V4 Generative Universe Kernel 02](../docs/diagrams/v4-generative-universe-kernel-02.svg)
 
 v3 gives Darwin a fixed set of hand-built worlds. v4 gives Darwin a persisted,
 queryable substrate for generating sandbox worlds from explicit causal

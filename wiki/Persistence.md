@@ -27,56 +27,7 @@ The durable structured store, opened by `PersistentStore`
 
 ## v4 data model
 
-```mermaid
-erDiagram
-    knowledge_atoms ||--o{ world_specs : "provenance_ids"
-    world_specs ||--o{ generated_experiments : "world_name"
-    world_specs ||--o{ validation_results : "target"
-    research_events ||--o{ knowledge_atoms : "future source"
-
-    knowledge_atoms {
-        integer id
-        string atom_id
-        string kind
-        string subject
-        string relation
-        string object
-        float confidence
-        boolean promoted
-        string support_kind
-        json provenance
-        json payload
-    }
-
-    world_specs {
-        integer id
-        string name
-        string status
-        json payload
-    }
-
-    generated_experiments {
-        integer id
-        string world_name
-        string action
-        json provenance_ids
-        json payload
-    }
-
-    validation_results {
-        integer id
-        string target
-        boolean valid
-        json payload
-    }
-
-    research_events {
-        integer id
-        string status
-        string url
-        json payload
-    }
-```
+![Persistence 01](../docs/diagrams/persistence-01.svg)
 
 Current v4 writes are `knowledge_atoms` and `world_specs`, with generated
 experiment outcomes recorded through the existing `experiments` table.

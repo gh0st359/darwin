@@ -1,0 +1,14 @@
+flowchart LR
+    Corpus["curated corpus<br/>Wikipedia text, Wikidata JSONL, local wikidump text"]
+    Ingestor["CorpusIngestor<br/>deterministic extractors"]
+    Atom["KnowledgeAtom<br/>definition / relation / quantity / alias / causal_hypothesis"]
+    Graph["KnowledgeGraph<br/>persisted query surface"]
+    Generator["WorldSpecGenerator<br/>causal hypotheses -> WorldSpec"]
+    Compiler["SandboxedWorldCompiler<br/>validate data-only worlds"]
+    Adapter["GenerativeUniverseAdapter<br/>EnvironmentAdapter-compatible"]
+    Runtime["DarwinRuntime<br/>experiment / simulation / dream / self_modification / uncertainty"]
+    Plan["ResponsePlan<br/>closed plan payload"]
+    DLM["DLM / Gemma<br/>prose renderer only"]
+    User["user"]
+
+    Corpus --> Ingestor --> Atom --> Graph --> Generator --> Compiler --> Adapter --> Runtime --> Plan --> DLM --> User

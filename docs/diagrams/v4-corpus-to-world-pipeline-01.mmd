@@ -1,0 +1,14 @@
+flowchart LR
+    File["local file"]
+    Ingest["CorpusIngestor"]
+    Atom["KnowledgeAtom<br/>with Provenance"]
+    Store["knowledge_atoms"]
+    Graph["KnowledgeGraph"]
+    Hypothesis["causal_hypothesis atoms"]
+    Spec["WorldSpec"]
+    Validate["SandboxedWorldCompiler"]
+    Adapter["GenerativeUniverseAdapter"]
+    Experiment["Darwin experiment"]
+    Promote["promoted provenance"]
+
+    File --> Ingest --> Atom --> Store --> Graph --> Hypothesis --> Spec --> Validate --> Adapter --> Experiment --> Promote

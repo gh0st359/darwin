@@ -51,22 +51,7 @@ drift and fall back to deterministic output.
 
 ## v4 architecture overview
 
-```mermaid
-flowchart LR
-    Corpus["curated offline corpus<br/>wikipedia | wikidata | wikidump"]
-    Atoms["KnowledgeAtom<br/>definition / relation / quantity / alias / causal_hypothesis"]
-    Graph["KnowledgeGraph<br/>persisted, queryable, provenance-backed"]
-    Generator["WorldSpecGenerator<br/>hypotheses -> data-only schemas"]
-    Compiler["SandboxedWorldCompiler<br/>validate before activation"]
-    Adapter["GenerativeUniverseAdapter<br/>existing EnvironmentAdapter protocol"]
-    Runtime["Darwin Runtime<br/>experiments, simulation, dream, self-modification, uncertainty"]
-    Plan["ResponsePlan<br/>structured answer plan"]
-    DLM["DLM / Gemma<br/>mouth only"]
-    User["user"]
-
-    Corpus --> Atoms --> Graph --> Generator --> Compiler --> Adapter --> Runtime --> Plan --> DLM --> User
-    Plan -. "validator rejects unsupported rendering" .-> DLM
-```
+![Darwin v4 architecture overview](docs/diagrams/readme-01.svg)
 
 The important boundary is between `ResponsePlan` and the DLM. Darwin's
 reasoning path is the symbolic/causal kernel. Gemma can make the wording nicer,
@@ -356,54 +341,15 @@ Chat commands:
 
 Runtime selection:
 
-```mermaid
-flowchart TB
-    Brain["darwin brain"]
-    V3["--kernel v3<br/>UniverseSimulation<br/>room / math / space / time"]
-    V4["--kernel v4<br/>GenerativeUniverse<br/>sandboxed generated worlds"]
-    Kernel["Darwin causal kernel<br/>CausalModel + Memory + WorldModel + SelfModel + DiscoursePlanner"]
-    Plan["ResponsePlan"]
-    Validator["FaithfulnessValidator + ResponseCritic"]
-    Mouth["StubDLM or GemmaDLM"]
-    Connect["darwin connect"]
-
-    Brain --> V3
-    Brain --> V4
-    V3 --> Kernel
-    V4 --> Kernel
-    Kernel --> Plan --> Validator --> Mouth --> Connect
-```
+![Runtime selection: v3 vs v4 kernel through connect](docs/diagrams/readme-02.svg)
 
 Belief promotion:
 
-```mermaid
-flowchart LR
-    Claim["corpus claim<br/>Force causes acceleration"]
-    Hypothesis["causal hypothesis<br/>unpromoted KnowledgeAtom"]
-    World["generated sandbox world"]
-    Experiment["Darwin acts in world"]
-    Transition["observed transition"]
-    Promoted["provenance promoted<br/>support_kind=generated_experiment"]
-
-    Claim --> Hypothesis --> World --> Experiment --> Transition --> Promoted
-    Claim -. "not a belief by itself" .-> Hypothesis
-```
+![Belief promotion from corpus claim to generated experiment](docs/diagrams/readme-03.svg)
 
 DLM boundary:
 
-```mermaid
-flowchart LR
-    Kernel["Darwin kernel<br/>owns reasoning"]
-    Plan["ResponsePlan<br/>closed structured payload"]
-    Gemma["Gemma / DLM<br/>renders prose only"]
-    Validator["FaithfulnessValidator<br/>rejects unsupported output"]
-    Composer["deterministic composer fallback"]
-    User["user"]
-
-    Kernel --> Plan --> Gemma --> Validator
-    Validator -->|valid| User
-    Validator -->|invalid| Composer --> User
-```
+![DLM boundary: ResponsePlan, Gemma, validator, composer fallback](docs/diagrams/readme-04.svg)
 
 ## What v4 is not yet
 

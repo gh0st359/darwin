@@ -8,19 +8,7 @@ beliefs, or decide whether corpus claims are true.
 
 ## Boundary diagram
 
-```mermaid
-flowchart LR
-    Kernel["Darwin kernel<br/>symbolic/causal reasoning"]
-    Plan["ResponsePlan<br/>closed structured payload"]
-    Gemma["GemmaDLM<br/>prose renderer"]
-    Validator["FaithfulnessValidator<br/>reject unsupported output"]
-    Composer["deterministic composer fallback"]
-    User["user"]
-
-    Kernel --> Plan --> Gemma --> Validator
-    Validator -->|valid| User
-    Validator -->|invalid| Composer --> User
-```
+![V4 Using Gemma As The Mouth 01](../docs/diagrams/v4-using-gemma-as-the-mouth-01.svg)
 
 ## What Darwin owns
 
@@ -61,25 +49,7 @@ darwin brain --kernel v4 --dlm stub
 
 ## Validator behavior
 
-```mermaid
-sequenceDiagram
-    participant K as Darwin kernel
-    participant P as ResponsePlan
-    participant G as GemmaDLM
-    participant V as FaithfulnessValidator
-    participant C as Composer
-    participant U as User
-
-    K->>P: create structured plan
-    P->>G: to_dlm_payload()
-    G-->>V: candidate prose
-    alt faithful
-        V-->>U: send prose
-    else drift detected
-        V->>C: fall back
-        C-->>U: deterministic rendering
-    end
-```
+![V4 Using Gemma As The Mouth 02](../docs/diagrams/v4-using-gemma-as-the-mouth-02.svg)
 
 The validator can reject output for:
 

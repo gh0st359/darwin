@@ -1,0 +1,24 @@
+flowchart TB
+    Spec["WorldSpec"]
+    Code{"contains_code?"}
+    Trust{"trust_level == sandboxed?"}
+    Actions{"has actions?"}
+    Names{"valid variable names?"}
+    Prefix{"actions start generated/?"}
+    Ops{"ops in add/set/toggle?"}
+    Valid["compile to SandboxedGeneratedAdapter"]
+    Invalid["ValidationResult(valid=false, errors=[...])"]
+
+    Spec --> Code
+    Code -->|yes| Invalid
+    Code -->|no| Trust
+    Trust -->|no| Invalid
+    Trust -->|yes| Actions
+    Actions -->|no| Invalid
+    Actions -->|yes| Names
+    Names -->|no| Invalid
+    Names -->|yes| Prefix
+    Prefix -->|no| Invalid
+    Prefix -->|yes| Ops
+    Ops -->|no| Invalid
+    Ops -->|yes| Valid

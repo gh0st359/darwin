@@ -27,20 +27,7 @@ because the current implementation treats it as Wikipedia-style text.
 
 ## Pipeline
 
-```mermaid
-flowchart LR
-    File["local corpus file"]
-    Source["source type<br/>wikipedia | wikidata | wikidump"]
-    Ingestor["CorpusIngestor.ingest"]
-    Extract["deterministic extractor"]
-    Atom["KnowledgeAtom"]
-    Store["PersistentStore.record_knowledge_atom"]
-    Graph["KnowledgeGraph.from_store"]
-    Specs["WorldSpecGenerator.generate"]
-    WorldStore["PersistentStore.record_world_spec"]
-
-    File --> Source --> Ingestor --> Extract --> Atom --> Store --> Graph --> Specs --> WorldStore
-```
+![V4_Corpus_Ingestion 01](diagrams/v4_corpus_ingestion-01.svg)
 
 ## `KnowledgeAtom`
 
@@ -137,17 +124,7 @@ generated causal worlds.
 
 ## Claims are not beliefs
 
-```mermaid
-flowchart LR
-    Text["corpus text"]
-    Atom["KnowledgeAtom<br/>support_kind=corpus"]
-    Hypothesis["possible causal hypothesis"]
-    Belief["CausalModel belief"]
-    Experiment["generated experiment"]
-
-    Text --> Atom --> Hypothesis --> Experiment --> Belief
-    Atom -. "not automatically inserted" .-> Belief
-```
+![V4_Corpus_Ingestion 02](diagrams/v4_corpus_ingestion-02.svg)
 
 A corpus claim can answer "what does the knowledge graph contain?" with
 provenance. It does not become a learned causal belief until Darwin experiences

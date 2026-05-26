@@ -1,0 +1,18 @@
+flowchart TB
+    State["observed state"]
+    Action["intervention"]
+    Transition["Transition(before, action, after, reward)"]
+    Causal["CausalModel"]
+    World["WorldModel"]
+    Memory["Episodic + semantic memory"]
+    Discourse["DiscoursePlanner"]
+    Plan["ResponsePlan"]
+
+    State --> Action --> Transition
+    Transition --> Causal
+    Transition --> World
+    Transition --> Memory
+    Causal --> Discourse
+    World --> Discourse
+    Memory --> Discourse
+    Discourse --> Plan

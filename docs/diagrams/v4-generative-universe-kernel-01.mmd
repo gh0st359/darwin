@@ -1,0 +1,13 @@
+flowchart LR
+    Corpus["curated corpus<br/>wikipedia | wikidata | wikidump"]
+    Atoms["KnowledgeAtoms<br/>definition / relation / quantity / alias / causal hypothesis"]
+    Graph["KnowledgeGraph"]
+    Generator["WorldSpecGenerator"]
+    Compiler["SandboxedWorldCompiler"]
+    Adapter["GenerativeUniverseAdapter"]
+    Runtime["Darwin Runtime"]
+    Plan["ResponsePlan"]
+    DLM["DLM / Gemma<br/>mouth only"]
+    User["user"]
+
+    Corpus --> Atoms --> Graph --> Generator --> Compiler --> Adapter --> Runtime --> Plan --> DLM --> User

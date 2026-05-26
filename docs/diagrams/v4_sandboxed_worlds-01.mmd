@@ -1,0 +1,13 @@
+flowchart LR
+    Atom["KnowledgeAtom<br/>kind=causal_hypothesis"]
+    Generator["WorldSpecGenerator"]
+    Spec["WorldSpec<br/>name, concepts, initial_state, actions, provenance_ids"]
+    Compiler["SandboxedWorldCompiler.validate"]
+    Adapter["SandboxedGeneratedAdapter"]
+    Universe["GenerativeUniverse"]
+    EnvAdapter["GenerativeUniverseAdapter"]
+    Runtime["DarwinRuntime"]
+
+    Atom --> Generator --> Spec --> Compiler
+    Compiler -->|valid| Adapter --> Universe --> EnvAdapter --> Runtime
+    Compiler -->|invalid| Reject["reject before activation"]

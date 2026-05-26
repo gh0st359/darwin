@@ -1,0 +1,14 @@
+flowchart LR
+    Corpus["curated offline corpus<br/>wikipedia | wikidata | wikidump"]
+    Atoms["KnowledgeAtom<br/>definition / relation / quantity / alias / causal_hypothesis"]
+    Graph["KnowledgeGraph<br/>persisted, queryable, provenance-backed"]
+    Generator["WorldSpecGenerator<br/>hypotheses -> data-only schemas"]
+    Compiler["SandboxedWorldCompiler<br/>validate before activation"]
+    Adapter["GenerativeUniverseAdapter<br/>existing EnvironmentAdapter protocol"]
+    Runtime["Darwin Runtime<br/>experiments, simulation, dream, self-modification, uncertainty"]
+    Plan["ResponsePlan<br/>structured answer plan"]
+    DLM["DLM / Gemma<br/>mouth only"]
+    User["user"]
+
+    Corpus --> Atoms --> Graph --> Generator --> Compiler --> Adapter --> Runtime --> Plan --> DLM --> User
+    Plan -. "validator rejects unsupported rendering" .-> DLM

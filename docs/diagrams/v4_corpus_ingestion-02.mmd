@@ -1,0 +1,9 @@
+flowchart LR
+    Text["corpus text"]
+    Atom["KnowledgeAtom<br/>support_kind=corpus"]
+    Hypothesis["possible causal hypothesis"]
+    Belief["CausalModel belief"]
+    Experiment["generated experiment"]
+
+    Text --> Atom --> Hypothesis --> Experiment --> Belief
+    Atom -. "not automatically inserted" .-> Belief

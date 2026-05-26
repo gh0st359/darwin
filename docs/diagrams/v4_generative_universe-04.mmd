@@ -1,0 +1,13 @@
+flowchart LR
+    Claim["corpus claim<br/>Force causes acceleration"]
+    Atom["KnowledgeAtom<br/>kind=causal_hypothesis<br/>promoted=false"]
+    Spec["WorldSpec<br/>generated/force_acceleration"]
+    Action["generated/apply_force"]
+    Transition["observed transition<br/>force.acceleration increases"]
+    Promotion["promoted=true<br/>support_kind=generated_experiment"]
+    Belief["CausalModel belief<br/>learned from transition"]
+
+    Claim --> Atom --> Spec --> Action --> Transition
+    Transition --> Promotion
+    Transition --> Belief
+    Claim -. "not automatically trusted" .-> Atom

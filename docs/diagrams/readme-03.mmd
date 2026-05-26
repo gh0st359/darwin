@@ -1,0 +1,10 @@
+flowchart LR
+    Claim["corpus claim<br/>Force causes acceleration"]
+    Hypothesis["causal hypothesis<br/>unpromoted KnowledgeAtom"]
+    World["generated sandbox world"]
+    Experiment["Darwin acts in world"]
+    Transition["observed transition"]
+    Promoted["provenance promoted<br/>support_kind=generated_experiment"]
+
+    Claim --> Hypothesis --> World --> Experiment --> Transition --> Promoted
+    Claim -. "not a belief by itself" .-> Hypothesis

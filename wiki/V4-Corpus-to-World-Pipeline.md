@@ -6,22 +6,7 @@ beliefs automatically.
 
 ## End-to-end flow
 
-```mermaid
-flowchart LR
-    File["local file"]
-    Ingest["CorpusIngestor"]
-    Atom["KnowledgeAtom<br/>with Provenance"]
-    Store["knowledge_atoms"]
-    Graph["KnowledgeGraph"]
-    Hypothesis["causal_hypothesis atoms"]
-    Spec["WorldSpec"]
-    Validate["SandboxedWorldCompiler"]
-    Adapter["GenerativeUniverseAdapter"]
-    Experiment["Darwin experiment"]
-    Promote["promoted provenance"]
-
-    File --> Ingest --> Atom --> Store --> Graph --> Hypothesis --> Spec --> Validate --> Adapter --> Experiment --> Promote
-```
+![V4 Corpus To World Pipeline 01](../docs/diagrams/v4-corpus-to-world-pipeline-01.svg)
 
 ## Knowledge atoms
 
@@ -65,18 +50,7 @@ the current path to `causal_hypothesis` atoms.
 
 ## Belief promotion
 
-```mermaid
-flowchart LR
-    Corpus["corpus claim"]
-    Hypothesis["hypothesis<br/>promoted=false"]
-    World["generated world"]
-    Action["generated action"]
-    Transition["observed transition"]
-    Support["support_kind=generated_experiment"]
-
-    Corpus --> Hypothesis --> World --> Action --> Transition --> Support
-    Corpus -. "not a causal belief by itself" .-> Hypothesis
-```
+![V4 Corpus To World Pipeline 02](../docs/diagrams/v4-corpus-to-world-pipeline-02.svg)
 
 When a generated action runs, its metadata carries `provenance_ids`. The runtime
 uses those IDs to promote corresponding atoms after Darwin learns from the
@@ -84,56 +58,7 @@ transition.
 
 ## Data model
 
-```mermaid
-erDiagram
-    knowledge_atoms ||--o{ world_specs : "provenance_ids"
-    world_specs ||--o{ generated_experiments : "world_name"
-    world_specs ||--o{ validation_results : "target"
-    research_events ||--o{ knowledge_atoms : "future source"
-
-    knowledge_atoms {
-        integer id
-        string atom_id
-        string kind
-        string subject
-        string relation
-        string object
-        float confidence
-        boolean promoted
-        string support_kind
-        json provenance
-        json payload
-    }
-
-    world_specs {
-        integer id
-        string name
-        string status
-        json payload
-    }
-
-    generated_experiments {
-        integer id
-        string world_name
-        string action
-        json provenance_ids
-        json payload
-    }
-
-    validation_results {
-        integer id
-        string target
-        boolean valid
-        json payload
-    }
-
-    research_events {
-        integer id
-        string status
-        string url
-        json payload
-    }
-```
+![V4 Corpus To World Pipeline 03](../docs/diagrams/v4-corpus-to-world-pipeline-03.svg)
 
 Current active writes are `knowledge_atoms`, `world_specs`, and the existing
 `experiments` table. `generated_experiments`, `validation_results`, and

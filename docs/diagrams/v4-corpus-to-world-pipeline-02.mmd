@@ -1,0 +1,10 @@
+flowchart LR
+    Corpus["corpus claim"]
+    Hypothesis["hypothesis<br/>promoted=false"]
+    World["generated world"]
+    Action["generated action"]
+    Transition["observed transition"]
+    Support["support_kind=generated_experiment"]
+
+    Corpus --> Hypothesis --> World --> Action --> Transition --> Support
+    Corpus -. "not a causal belief by itself" .-> Hypothesis

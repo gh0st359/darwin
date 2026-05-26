@@ -1,0 +1,13 @@
+flowchart TB
+    Plan["ResponsePlan"]
+    Render["GemmaDLM.render(plan)"]
+    Output["candidate prose"]
+    Validate["FaithfulnessValidator.validate(plan, text)"]
+    Valid{"valid?"}
+    Critique["ResponseCritic.evaluate"]
+    User["send to user"]
+    Fallback["NaturalLanguageComposer fallback"]
+
+    Plan --> Render --> Output --> Validate --> Valid
+    Valid -->|yes| Critique --> User
+    Valid -->|no| Fallback --> Critique

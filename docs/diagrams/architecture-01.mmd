@@ -1,0 +1,14 @@
+flowchart TB
+    DLM["DLM (optional)<br/>StubDLM or GemmaDLM<br/>FaithfulnessValidator gates rendering"]
+    Response["ResponsePlan + DiscoursePlanner + Composer + ResponseCritic"]
+    Runtime["DarwinRuntime<br/>experiment / simulation / dream / self_modification / uncertainty"]
+    Agent["Darwin agent<br/>CausalModel, CausalChainEngine, CausalPlanner,<br/>Memory, ConceptIndex, WorldModel, SelfModel,<br/>ExperimentEngine, SemanticParser, SemanticMemory"]
+    Store["Persistence<br/>SQLite + JSON runtime state + JSONL logs"]
+    V3["v3 UniverseSimulation<br/>hand-built adapters"]
+    V4["v4 GenerativeUniverse<br/>sandboxed generated worlds"]
+
+    V3 --> Agent
+    V4 --> Agent
+    Agent --> Runtime --> Response --> DLM
+    Store --> Agent
+    Runtime --> Store

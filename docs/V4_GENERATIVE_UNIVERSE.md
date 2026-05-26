@@ -30,69 +30,16 @@ research, or broad autonomous world-building.
 
 ## High-level architecture
 
-```mermaid
-flowchart LR
-    Corpus["curated corpus<br/>Wikipedia text, Wikidata JSONL, local wikidump text"]
-    Ingestor["CorpusIngestor<br/>deterministic extractors"]
-    Atom["KnowledgeAtom<br/>definition / relation / quantity / alias / causal_hypothesis"]
-    Graph["KnowledgeGraph<br/>persisted query surface"]
-    Generator["WorldSpecGenerator<br/>causal hypotheses -> WorldSpec"]
-    Compiler["SandboxedWorldCompiler<br/>validate data-only worlds"]
-    Adapter["GenerativeUniverseAdapter<br/>EnvironmentAdapter-compatible"]
-    Runtime["DarwinRuntime<br/>experiment / simulation / dream / self_modification / uncertainty"]
-    Plan["ResponsePlan<br/>closed plan payload"]
-    DLM["DLM / Gemma<br/>prose renderer only"]
-    User["user"]
-
-    Corpus --> Ingestor --> Atom --> Graph --> Generator --> Compiler --> Adapter --> Runtime --> Plan --> DLM --> User
-```
+![V4_Generative_Universe 01](diagrams/v4_generative_universe-01.svg)
 
 The DLM sits after the plan. It is the mouth, not the source of intelligence.
 The reasoning path is:
 
-```mermaid
-flowchart TB
-    State["observed state"]
-    Action["intervention"]
-    Transition["Transition(before, action, after, reward)"]
-    Causal["CausalModel"]
-    World["WorldModel"]
-    Memory["Episodic + semantic memory"]
-    Discourse["DiscoursePlanner"]
-    Plan["ResponsePlan"]
-
-    State --> Action --> Transition
-    Transition --> Causal
-    Transition --> World
-    Transition --> Memory
-    Causal --> Discourse
-    World --> Discourse
-    Memory --> Discourse
-    Discourse --> Plan
-```
+![V4_Generative_Universe 02](diagrams/v4_generative_universe-02.svg)
 
 ## Runtime comparison: v3 vs v4
 
-```mermaid
-flowchart TB
-    subgraph V3["v3 UniverseSimulation"]
-        V3World["hand-built adapters<br/>room / math / space / time"]
-        V3Actions["fixed action set"]
-        V3State["fixed state variables"]
-    end
-
-    subgraph V4["v4 GenerativeUniverse"]
-        V4Atoms["KnowledgeAtom records"]
-        V4Specs["WorldSpec records"]
-        V4Compiler["SandboxedWorldCompiler"]
-        V4Adapter["GenerativeUniverseAdapter"]
-    end
-
-    Kernel["same Darwin symbolic/causal kernel"]
-
-    V3World --> V3Actions --> V3State --> Kernel
-    V4Atoms --> V4Specs --> V4Compiler --> V4Adapter --> Kernel
-```
+![V4_Generative_Universe 03](diagrams/v4_generative_universe-03.svg)
 
 v3 remains useful as the legacy/default hand-built universe path. v4 swaps the
 environment substrate: generated sandbox worlds expose actions through the same
@@ -104,21 +51,7 @@ Corpus claims do not become causal beliefs automatically. They can become
 hypotheses. A generated experiment can then promote provenance after Darwin acts
 in the sandbox world and observes a transition.
 
-```mermaid
-flowchart LR
-    Claim["corpus claim<br/>Force causes acceleration"]
-    Atom["KnowledgeAtom<br/>kind=causal_hypothesis<br/>promoted=false"]
-    Spec["WorldSpec<br/>generated/force_acceleration"]
-    Action["generated/apply_force"]
-    Transition["observed transition<br/>force.acceleration increases"]
-    Promotion["promoted=true<br/>support_kind=generated_experiment"]
-    Belief["CausalModel belief<br/>learned from transition"]
-
-    Claim --> Atom --> Spec --> Action --> Transition
-    Transition --> Promotion
-    Transition --> Belief
-    Claim -. "not automatically trusted" .-> Atom
-```
+![V4_Generative_Universe 04](diagrams/v4_generative_universe-04.svg)
 
 The promotion implementation is in `DarwinRuntime._loop_experiment()`:
 
@@ -133,62 +66,7 @@ The promotion implementation is in `DarwinRuntime._loop_experiment()`:
 tables are active in this branch; others are reserved schema surface for the v4
 pipeline as it grows.
 
-```mermaid
-erDiagram
-    knowledge_atoms ||--o{ world_specs : "provenance_ids"
-    world_specs ||--o{ generated_experiments : "world_name"
-    world_specs ||--o{ validation_results : "target"
-    knowledge_atoms ||--o{ generated_experiments : "provenance_ids"
-    research_events ||--o{ knowledge_atoms : "future curated claims"
-
-    knowledge_atoms {
-        integer id
-        string atom_id
-        string kind
-        string subject
-        string relation
-        string object
-        float confidence
-        boolean promoted
-        string support_kind
-        json provenance
-        json payload
-        timestamp created_at
-    }
-
-    world_specs {
-        integer id
-        string name
-        string status
-        json payload
-        timestamp created_at
-    }
-
-    generated_experiments {
-        integer id
-        string world_name
-        string action
-        json provenance_ids
-        json payload
-        timestamp created_at
-    }
-
-    validation_results {
-        integer id
-        string target
-        boolean valid
-        json payload
-        timestamp created_at
-    }
-
-    research_events {
-        integer id
-        string status
-        string url
-        json payload
-        timestamp created_at
-    }
-```
+![V4_Generative_Universe 05](diagrams/v4_generative_universe-05.svg)
 
 Current writes:
 

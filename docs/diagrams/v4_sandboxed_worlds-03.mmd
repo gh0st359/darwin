@@ -1,0 +1,13 @@
+sequenceDiagram
+    participant R as DarwinRuntime
+    participant A as GenerativeUniverseAdapter
+    participant D as Darwin kernel
+    participant S as PersistentStore
+
+    R->>A: possible_actions()
+    A-->>R: generated action with provenance_ids
+    R->>A: apply(action)
+    A-->>R: after_state, reward
+    R->>D: learn(Transition)
+    D-->>R: causal model updates
+    R->>S: promote_knowledge_atoms(provenance_ids, "generated_experiment")

@@ -11,36 +11,11 @@ deep dive.
 
 ## Layered view
 
-```mermaid
-flowchart TB
-    DLM["DLM (optional)<br/>StubDLM or GemmaDLM<br/>FaithfulnessValidator gates rendering"]
-    Response["ResponsePlan + DiscoursePlanner + Composer + ResponseCritic"]
-    Runtime["DarwinRuntime<br/>experiment / simulation / dream / self_modification / uncertainty"]
-    Agent["Darwin agent<br/>CausalModel, CausalChainEngine, CausalPlanner,<br/>Memory, ConceptIndex, WorldModel, SelfModel,<br/>ExperimentEngine, SemanticParser, SemanticMemory"]
-    Store["Persistence<br/>SQLite + JSON runtime state + JSONL logs"]
-    V3["v3 UniverseSimulation<br/>hand-built adapters"]
-    V4["v4 GenerativeUniverse<br/>sandboxed generated worlds"]
-
-    V3 --> Agent
-    V4 --> Agent
-    Agent --> Runtime --> Response --> DLM
-    Store --> Agent
-    Runtime --> Store
-```
+![Architecture 01](../docs/diagrams/architecture-01.svg)
 
 ## v4 corpus-to-world layer
 
-```mermaid
-flowchart LR
-    Corpus["curated corpus"]
-    Atoms["KnowledgeAtom + Provenance"]
-    Graph["KnowledgeGraph"]
-    Specs["WorldSpecGenerator"]
-    Compiler["SandboxedWorldCompiler"]
-    Adapter["GenerativeUniverseAdapter"]
-
-    Corpus --> Atoms --> Graph --> Specs --> Compiler --> Adapter
-```
+![Architecture 02](../docs/diagrams/architecture-02.svg)
 
 Corpus claims can propose hypotheses. They do not become causal beliefs until
 Darwin acts in a generated sandbox world and observes a transition.

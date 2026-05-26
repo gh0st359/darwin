@@ -1,0 +1,15 @@
+flowchart TB
+    Brain["darwin brain"]
+    V3["--kernel v3<br/>UniverseSimulation<br/>room / math / space / time"]
+    V4["--kernel v4<br/>GenerativeUniverse<br/>sandboxed generated worlds"]
+    Kernel["Darwin causal kernel<br/>CausalModel + Memory + WorldModel + SelfModel + DiscoursePlanner"]
+    Plan["ResponsePlan"]
+    Validator["FaithfulnessValidator + ResponseCritic"]
+    Mouth["StubDLM or GemmaDLM"]
+    Connect["darwin connect"]
+
+    Brain --> V3
+    Brain --> V4
+    V3 --> Kernel
+    V4 --> Kernel
+    Kernel --> Plan --> Validator --> Mouth --> Connect

@@ -1,0 +1,26 @@
+flowchart LR
+    subgraph Kernel["Darwin symbolic/causal kernel owns reasoning"]
+        Knowledge["KnowledgeGraph"]
+        Causal["CausalModel"]
+        World["WorldModel"]
+        Runtime["DarwinRuntime"]
+        Discourse["DiscoursePlanner"]
+    end
+
+    Plan["ResponsePlan<br/>closed structured payload"]
+
+    subgraph Mouth["DLM/Gemma owns wording only"]
+        Gemma["GemmaDLM"]
+        Stub["StubDLM / composer"]
+    end
+
+    Validator["FaithfulnessValidator<br/>rejects drift"]
+    Critic["ResponseCritic<br/>Darwin-side critique"]
+    User["user"]
+
+    Knowledge --> Discourse
+    Causal --> Discourse
+    World --> Discourse
+    Runtime --> Discourse
+    Discourse --> Plan --> Gemma --> Validator --> Critic --> User
+    Plan --> Stub --> Validator

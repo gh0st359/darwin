@@ -1,0 +1,16 @@
+flowchart TB
+    subgraph V3["v3 UniverseSimulation"]
+        Fixed["hand-built room/math/space/time domains"]
+    end
+
+    subgraph V4["v4 GenerativeUniverse"]
+        Corpus["curated corpus"]
+        Atoms["KnowledgeAtoms"]
+        Specs["WorldSpecs"]
+        Worlds["sandbox generated worlds"]
+    end
+
+    Kernel["same Darwin symbolic/causal kernel"]
+
+    Fixed --> Kernel
+    Corpus --> Atoms --> Specs --> Worlds --> Kernel

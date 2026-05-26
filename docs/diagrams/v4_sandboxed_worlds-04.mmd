@@ -1,0 +1,15 @@
+flowchart TB
+    Start["v4 brain startup"]
+    Load["load_world_specs()"]
+    HasSpecs{"specs exist?"}
+    BuildGraph["KnowledgeGraph.from_store"]
+    Generate["WorldSpecGenerator.generate"]
+    HasGenerated{"generated specs exist?"}
+    Bootstrap["generated/curiosity_bootstrap"]
+    Adapter["GenerativeUniverseAdapter"]
+
+    Start --> Load --> HasSpecs
+    HasSpecs -->|yes| Adapter
+    HasSpecs -->|no| BuildGraph --> Generate --> HasGenerated
+    HasGenerated -->|yes| Adapter
+    HasGenerated -->|no| Bootstrap --> Adapter

@@ -1,0 +1,10 @@
+flowchart LR
+    Corpus["curated corpus"]
+    Atoms["KnowledgeAtom + Provenance"]
+    Graph["KnowledgeGraph"]
+    Specs["WorldSpecGenerator"]
+    Compiler["SandboxedWorldCompiler"]
+    Adapter["GenerativeUniverseAdapter"]
+    Kernel["same Darwin symbolic/causal kernel"]
+
+    Corpus --> Atoms --> Graph --> Specs --> Compiler --> Adapter --> Kernel
