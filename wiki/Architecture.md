@@ -1,35 +1,49 @@
 # Architecture Overview
 
-Darwin v2 is organized as a single Python package (`darwin/`) with no
-external runtime dependencies for the core mind. The DLM optionally
-talks to a local Ollama / llama-cpp / transformers backend; everything
-else is stdlib.
+Darwin is organized as a single Python package (`darwin/`) with no external
+runtime dependencies for the core mind. The DLM optionally talks to a local
+Ollama / llama-cpp / transformers backend; everything else is stdlib.
+
+Current branch note: Darwin v4 keeps the v2/v3 symbolic + causal kernel and
+adds the Generative Universe substrate. See
+[V4 Generative Universe Kernel](V4-Generative-Universe-Kernel.md) for the v4
+deep dive.
 
 ## Layered view
 
+```mermaid
+flowchart TB
+    DLM["DLM (optional)<br/>StubDLM or GemmaDLM<br/>FaithfulnessValidator gates rendering"]
+    Response["ResponsePlan + DiscoursePlanner + Composer + ResponseCritic"]
+    Runtime["DarwinRuntime<br/>experiment / simulation / dream / self_modification / uncertainty"]
+    Agent["Darwin agent<br/>CausalModel, CausalChainEngine, CausalPlanner,<br/>Memory, ConceptIndex, WorldModel, SelfModel,<br/>ExperimentEngine, SemanticParser, SemanticMemory"]
+    Store["Persistence<br/>SQLite + JSON runtime state + JSONL logs"]
+    V3["v3 UniverseSimulation<br/>hand-built adapters"]
+    V4["v4 GenerativeUniverse<br/>sandboxed generated worlds"]
+
+    V3 --> Agent
+    V4 --> Agent
+    Agent --> Runtime --> Response --> DLM
+    Store --> Agent
+    Runtime --> Store
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│ DLM (optional): gemma-3-270m via Ollama / llama-cpp / transformers│
-│                FaithfulnessValidator gates every rendering        │
-├──────────────────────────────────────────────────────────────────┤
-│ ResponsePlan + DiscoursePlanner + Composer + ResponseCritic       │
-│ - mode, thesis, answer_points, causal_claims, uncertainty_levels  │
-├──────────────────────────────────────────────────────────────────┤
-│ DarwinRuntime: 5 background loops + chat handler                  │
-│ - experiment, simulation, dream, self_modification, uncertainty   │
-├──────────────────────────────────────────────────────────────────┤
-│ Darwin (agent) — orchestrates:                                    │
-│   CausalModel  CausalChainEngine  CausalPlanner                   │
-│   Memory  ConceptIndex  WorldModel  SelfModel                     │
-│   ExperimentEngine  SelfModificationEngine  SemanticParser        │
-│   SemanticMemory                                                  │
-├──────────────────────────────────────────────────────────────────┤
-│ Persistence: SQLite (PersistentStore) + JSON runtime state +      │
-│ JSONL plan / background / metrics / training logs                 │
-├──────────────────────────────────────────────────────────────────┤
-│ Embodiment adapters: AdaptiveRoomWorld, ConversationAdapter, …    │
-└──────────────────────────────────────────────────────────────────┘
+
+## v4 corpus-to-world layer
+
+```mermaid
+flowchart LR
+    Corpus["curated corpus"]
+    Atoms["KnowledgeAtom + Provenance"]
+    Graph["KnowledgeGraph"]
+    Specs["WorldSpecGenerator"]
+    Compiler["SandboxedWorldCompiler"]
+    Adapter["GenerativeUniverseAdapter"]
+
+    Corpus --> Atoms --> Graph --> Specs --> Compiler --> Adapter
 ```
+
+Corpus claims can propose hypotheses. They do not become causal beliefs until
+Darwin acts in a generated sandbox world and observes a transition.
 
 ## The cognitive cycle for a chat turn
 

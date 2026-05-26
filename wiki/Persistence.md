@@ -19,6 +19,69 @@ The durable structured store, opened by `PersistentStore`
 | `plans` | every multi-step plan |
 | `semantic_frames` | every parsed `SemanticFrame` (user + darwin) |
 | `self_modifications` | every proposed self-modification + outcome |
+| `knowledge_atoms` | v4 corpus-derived atoms with provenance and promotion state |
+| `world_specs` | v4 generated sandbox world specs |
+| `generated_experiments` | reserved v4 generated-experiment table |
+| `validation_results` | reserved v4 validation-result table |
+| `research_events` | reserved v4 live-research event table |
+
+## v4 data model
+
+```mermaid
+erDiagram
+    knowledge_atoms ||--o{ world_specs : "provenance_ids"
+    world_specs ||--o{ generated_experiments : "world_name"
+    world_specs ||--o{ validation_results : "target"
+    research_events ||--o{ knowledge_atoms : "future source"
+
+    knowledge_atoms {
+        integer id
+        string atom_id
+        string kind
+        string subject
+        string relation
+        string object
+        float confidence
+        boolean promoted
+        string support_kind
+        json provenance
+        json payload
+    }
+
+    world_specs {
+        integer id
+        string name
+        string status
+        json payload
+    }
+
+    generated_experiments {
+        integer id
+        string world_name
+        string action
+        json provenance_ids
+        json payload
+    }
+
+    validation_results {
+        integer id
+        string target
+        boolean valid
+        json payload
+    }
+
+    research_events {
+        integer id
+        string status
+        string url
+        json payload
+    }
+```
+
+Current v4 writes are `knowledge_atoms` and `world_specs`, with generated
+experiment outcomes recorded through the existing `experiments` table.
+`generated_experiments`, `validation_results`, and `research_events` exist as
+schema surface for the next stages.
 
 On startup, `Darwin.from_store(actions, store)` rehydrates:
 

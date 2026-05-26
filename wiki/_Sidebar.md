@@ -4,6 +4,11 @@
 - [Architecture](Architecture)
 - [Glossary](Glossary)
 
+### Darwin v4
+- [Generative Universe Kernel](V4-Generative-Universe-Kernel)
+- [Corpus to World Pipeline](V4-Corpus-to-World-Pipeline)
+- [Using Gemma as the Mouth](V4-Using-Gemma-as-the-Mouth)
+
 ### Getting started
 - [Getting Started](Getting-Started)
 - [Two-Terminal Workflow](Two-Terminal-Workflow)

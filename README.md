@@ -49,6 +49,30 @@ Gemma, when enabled, is still only the DLM: Darwin Language Module. It receives
 structured response plans and renders them as prose. The validator can reject
 drift and fall back to deterministic output.
 
+## v4 architecture overview
+
+```mermaid
+flowchart LR
+    Corpus["curated offline corpus<br/>wikipedia | wikidata | wikidump"]
+    Atoms["KnowledgeAtom<br/>definition / relation / quantity / alias / causal_hypothesis"]
+    Graph["KnowledgeGraph<br/>persisted, queryable, provenance-backed"]
+    Generator["WorldSpecGenerator<br/>hypotheses -> data-only schemas"]
+    Compiler["SandboxedWorldCompiler<br/>validate before activation"]
+    Adapter["GenerativeUniverseAdapter<br/>existing EnvironmentAdapter protocol"]
+    Runtime["Darwin Runtime<br/>experiments, simulation, dream, self-modification, uncertainty"]
+    Plan["ResponsePlan<br/>structured answer plan"]
+    DLM["DLM / Gemma<br/>mouth only"]
+    User["user"]
+
+    Corpus --> Atoms --> Graph --> Generator --> Compiler --> Adapter --> Runtime --> Plan --> DLM --> User
+    Plan -. "validator rejects unsupported rendering" .-> DLM
+```
+
+The important boundary is between `ResponsePlan` and the DLM. Darwin's
+reasoning path is the symbolic/causal kernel. Gemma can make the wording nicer,
+but it does not choose claims, create causal beliefs, or decide what Darwin
+knows.
+
 ## What changed in v4
 
 ### New data substrate
@@ -68,7 +92,7 @@ The store enables WAL mode for better concurrent read/write behavior.
 New command:
 
 ```bash
-darwin ingest-corpus --source wikidump --path PATH
+darwin ingest-corpus --source wikidump --path PATH --memory PATH
 ```
 
 Supported sources today:
@@ -209,13 +233,13 @@ EOF
 Ingest it:
 
 ```bash
-darwin ingest-corpus --source wikidump --path /tmp/darwin-force.txt
+darwin ingest-corpus --source wikidump --path /tmp/darwin-force.txt --memory /tmp/darwin-v4.sqlite3
 ```
 
 Start the v4 brain:
 
 ```bash
-darwin brain --kernel v4
+darwin brain --kernel v4 --workers auto --accelerator auto --memory /tmp/darwin-v4.sqlite3
 ```
 
 In another terminal:
@@ -328,61 +352,57 @@ Chat commands:
 /shutdown-brain      stop the brain daemon
 ```
 
-## Architecture
+## Architecture details
 
-```text
-                     darwin brain
-                          |
-        +-----------------+-----------------+
-        |                                   |
-   v3 UniverseSimulation              v4 GenerativeUniverse
-   room/math/space/time               generated sandbox worlds
-        |                                   |
-        +-----------------+-----------------+
-                          |
-                    Darwin kernel
-                          |
-   +----------+-----------+-----------+-----------+
-   |          |           |           |           |
-CausalModel Memory   WorldModel  SelfModel  DiscoursePlanner
-   |          |           |           |           |
-   +----------+-----------+-----------+-----------+
-                          |
-                    ResponsePlan
-                          |
-              FaithfulnessValidator + DLM
-                          |
-                   darwin connect
+Runtime selection:
+
+```mermaid
+flowchart TB
+    Brain["darwin brain"]
+    V3["--kernel v3<br/>UniverseSimulation<br/>room / math / space / time"]
+    V4["--kernel v4<br/>GenerativeUniverse<br/>sandboxed generated worlds"]
+    Kernel["Darwin causal kernel<br/>CausalModel + Memory + WorldModel + SelfModel + DiscoursePlanner"]
+    Plan["ResponsePlan"]
+    Validator["FaithfulnessValidator + ResponseCritic"]
+    Mouth["StubDLM or GemmaDLM"]
+    Connect["darwin connect"]
+
+    Brain --> V3
+    Brain --> V4
+    V3 --> Kernel
+    V4 --> Kernel
+    Kernel --> Plan --> Validator --> Mouth --> Connect
 ```
 
-v4 corpus-to-world pipeline:
+Belief promotion:
 
-```text
-curated corpus
-     |
-     v
-CorpusIngestor
-     |
-     v
-KnowledgeAtom records + provenance
-     |
-     v
-KnowledgeGraph
-     |
-     v
-WorldSpecGenerator
-     |
-     v
-SandboxedWorldCompiler
-     |
-     v
-GenerativeUniverseAdapter
-     |
-     v
-Darwin experiments
-     |
-     v
-promoted support when generated experience backs a claim
+```mermaid
+flowchart LR
+    Claim["corpus claim<br/>Force causes acceleration"]
+    Hypothesis["causal hypothesis<br/>unpromoted KnowledgeAtom"]
+    World["generated sandbox world"]
+    Experiment["Darwin acts in world"]
+    Transition["observed transition"]
+    Promoted["provenance promoted<br/>support_kind=generated_experiment"]
+
+    Claim --> Hypothesis --> World --> Experiment --> Transition --> Promoted
+    Claim -. "not a belief by itself" .-> Hypothesis
+```
+
+DLM boundary:
+
+```mermaid
+flowchart LR
+    Kernel["Darwin kernel<br/>owns reasoning"]
+    Plan["ResponsePlan<br/>closed structured payload"]
+    Gemma["Gemma / DLM<br/>renders prose only"]
+    Validator["FaithfulnessValidator<br/>rejects unsupported output"]
+    Composer["deterministic composer fallback"]
+    User["user"]
+
+    Kernel --> Plan --> Gemma --> Validator
+    Validator -->|valid| User
+    Validator -->|invalid| Composer --> User
 ```
 
 ## What v4 is not yet
@@ -400,6 +420,7 @@ Implemented now:
 - v4 introspection commands
 - disabled live research interface
 - tests for promotion boundaries and DLM faithfulness boundaries
+- v4 scheduler/metrics surface via `ActorScheduler`
 
 Still future work:
 
@@ -469,6 +490,67 @@ tests/
   test_v4_generative_universe.py
   plus regression coverage for v1-v3 behavior
 ```
+
+## More v4 documentation
+
+- [docs/V4_GENERATIVE_UNIVERSE.md](docs/V4_GENERATIVE_UNIVERSE.md) - the full
+  corpus-to-world architecture.
+- [docs/V4_CORPUS_INGESTION.md](docs/V4_CORPUS_INGESTION.md) - supported input
+  shapes, atom types, and provenance rules.
+- [docs/V4_SANDBOXED_WORLDS.md](docs/V4_SANDBOXED_WORLDS.md) - `WorldSpec`,
+  validation, generated adapters, and belief promotion.
+- [docs/V4_DLM_BOUNDARY.md](docs/V4_DLM_BOUNDARY.md) - why Gemma is a mouth, not
+  the mind.
+
+## Troubleshooting
+
+### `darwin connect` cannot connect
+
+Start the daemon first:
+
+```bash
+darwin brain --kernel v4 --memory /tmp/darwin-v4.sqlite3
+darwin connect
+```
+
+If the default port is busy, pick a port in both terminals:
+
+```bash
+darwin brain --kernel v4 --port 9999
+darwin connect --port 9999
+```
+
+### Corpus ingest creates atoms but no useful worlds
+
+`WorldSpecGenerator` currently generates worlds from `causal_hypothesis` atoms.
+Make sure the corpus contains explicit causal sentences such as:
+
+```text
+Force causes acceleration.
+Acceleration changes velocity.
+```
+
+Definitions like `Force is an interaction...` are stored as knowledge, but they
+do not become generated worlds by themselves.
+
+### Darwin answers from the corpus but does not treat it as proven
+
+That is expected. Corpus claims are provenance-backed knowledge atoms. They can
+propose hypotheses, but causal support is promoted only after Darwin runs an
+experiment in a generated sandbox world.
+
+### Gemma is unavailable or rejected
+
+Use the default `--dlm stub` if you do not have a local Gemma backend. If
+`--dlm gemma` is enabled and the renderer drifts from the plan,
+`FaithfulnessValidator` rejects it and Darwin falls back to the deterministic
+composer.
+
+### Live research appears disabled
+
+That is intentional in v4. `LiveResearcher` exists as a dormant subsystem, but
+`fetch()` raises unless future work explicitly enables live sources with trust,
+provenance, contradiction, and poisoning gates.
 
 ## Development checks
 

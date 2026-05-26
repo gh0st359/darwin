@@ -1,13 +1,17 @@
 # Darwin Wiki
 
-Welcome to the **Darwin v2: Eternal Causal Mind** wiki.
+Welcome to the **Darwin v4: Generative Universe Kernel** wiki.
 
-Darwin is an experimental causal-adaptive AI: a 24/7 symbolic + causal
-engine that learns from intervention, plans by simulated consequence,
-remembers, dreams, and rewrites its own parameters when doing so reduces
-prediction error. It can hold a conversation through an optional thin
-language renderer (the DLM), but its **thinking** is never delegated to
-a pre-trained model.
+Darwin is an experimental causal-adaptive AI: a symbolic + causal engine that
+learns from intervention, keeps inspectable memory, plans by simulated
+consequence, and renders language through an optional thin DLM. Its thinking is
+never delegated to a pre-trained model.
+
+v4 adds a generative universe substrate: curated corpus ingestion,
+provenance-backed `KnowledgeAtom`s, persisted `KnowledgeGraph` search,
+data-only `WorldSpec` generation, sandbox validation, and generated worlds that
+Darwin can act in. This is a foundation for a living, self-growing causal mind,
+not a claim of finished universal sentience.
 
 ## Pages
 
@@ -15,6 +19,11 @@ a pre-trained model.
 - [Philosophy and Non-Negotiables](Philosophy.md)
 - [Architecture Overview](Architecture.md)
 - [Glossary](Glossary.md)
+
+### Darwin v4
+- [V4 Generative Universe Kernel](V4-Generative-Universe-Kernel.md)
+- [V4 Corpus to World Pipeline](V4-Corpus-to-World-Pipeline.md)
+- [V4 Using Gemma as the Mouth](V4-Using-Gemma-as-the-Mouth.md)
 
 ### Getting up and running
 - [Getting Started](Getting-Started.md)
@@ -52,6 +61,6 @@ a pre-trained model.
 ## One-sentence summary
 
 Darwin is a symbolic + causal mind that runs all the time, learns from
-direct experience, simulates consequences before acting, rewrites its
-own parameters, and uses a strictly-controlled thin language module
-only to render its already-formed thoughts as English.
+direct experience, simulates consequences before acting, keeps corpus claims
+separate from promoted causal support, and uses a strictly-controlled thin
+language module only to render its already-formed thoughts as English.

@@ -1,5 +1,10 @@
 # Project Darwin Architecture
 
+> Current branch note: this page describes the core Darwin runtime and the
+> v2/v3 causal architecture. Darwin v4 keeps that symbolic/causal kernel and
+> adds the Generative Universe substrate documented in
+> [V4_GENERATIVE_UNIVERSE.md](V4_GENERATIVE_UNIVERSE.md).
+
 ## Mission
 
 Project Darwin is a causal-adaptive AI system. Its core claim is that
@@ -21,6 +26,27 @@ agency, and human-facing interaction.
 6. Darwin uses uncertainty as fuel for curiosity, not as a reason to freeze.
 7. Darwin can be embodied in a simulated world, software tools, or robots
    through the same perception-action-transition loop.
+
+## v4 generative universe addendum
+
+```mermaid
+flowchart LR
+    Corpus["curated corpus"]
+    Atoms["KnowledgeAtom + Provenance"]
+    Graph["KnowledgeGraph"]
+    Specs["WorldSpecGenerator"]
+    Compiler["SandboxedWorldCompiler"]
+    Adapter["GenerativeUniverseAdapter"]
+    Kernel["same Darwin symbolic/causal kernel"]
+
+    Corpus --> Atoms --> Graph --> Specs --> Compiler --> Adapter --> Kernel
+```
+
+In v4, `darwin brain --kernel v4` uses generated sandbox worlds instead of the
+hand-built `UniverseSimulation` adapter. The runtime, causal model, discourse
+planner, and DLM boundary remain the same. Corpus claims can propose hypotheses,
+but they do not become causal beliefs until Darwin acts and observes transitions
+inside a generated sandbox world.
 
 ## System loop
 

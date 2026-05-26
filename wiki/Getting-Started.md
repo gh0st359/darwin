@@ -8,15 +8,14 @@ core mind.
 ```bash
 git clone https://github.com/gh0st359/darwin
 cd darwin
-git checkout v2
+git checkout v4
 pip install -e .
 ```
 
 Verify the install:
 
 ```bash
-python -m unittest discover tests
-# Ran 44 tests in <6s. OK
+python -m unittest discover -s tests
 ```
 
 ## The 60-second tour
@@ -54,6 +53,48 @@ share one mind and one persistent memory.
 
 See [The Two-Terminal Workflow](Two-Terminal-Workflow.md) for details.
 
+## Try Darwin v4 with a tiny corpus
+
+```bash
+cat > /tmp/darwin-force.txt <<'EOF'
+== Force ==
+Force is an interaction that changes motion.
+Force causes acceleration.
+Aliases: push, pull
+EOF
+
+darwin ingest-corpus \
+  --source wikidump \
+  --path /tmp/darwin-force.txt \
+  --memory /tmp/darwin-v4.sqlite3
+```
+
+Start the v4 generative kernel:
+
+```bash
+darwin brain \
+  --kernel v4 \
+  --workers auto \
+  --accelerator auto \
+  --memory /tmp/darwin-v4.sqlite3
+```
+
+Then connect:
+
+```bash
+darwin connect
+```
+
+Useful v4 commands:
+
+```text
+/knowledge force
+/hypotheses
+/worlds
+/mind
+/research status
+```
+
 ## Single-terminal life (the old way)
 
 If you want one window that does everything:
@@ -84,7 +125,7 @@ darwin brain --memory ~/darwin/state.sqlite3
 
 ```bash
 ollama pull gemma3:270m
-darwin brain --dlm gemma --dlm-backend ollama
+darwin brain --kernel v4 --dlm gemma --dlm-backend ollama --dlm-model gemma3:270m
 ```
 
 Darwin will route its renderings through gemma-3-270m. If the output
@@ -97,6 +138,6 @@ inspect what happened with `/dlm` from any chat client.
 
 - Read [Philosophy and Non-Negotiables](Philosophy.md).
 - Read [Architecture Overview](Architecture.md).
+- Read [V4 Generative Universe Kernel](V4-Generative-Universe-Kernel.md).
 - Browse the [CLI Reference](CLI-Reference.md).
-- Look at `tests/test_v2.py` for executable examples of every v2
-  subsystem.
+- Look at `tests/test_v4_generative_universe.py` for executable v4 examples.

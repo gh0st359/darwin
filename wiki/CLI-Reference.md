@@ -5,8 +5,10 @@
 ```bash
 darwin run             # one-shot causal-learning run in the adaptive room
 darwin live            # single-terminal mind + chat
-darwin brain           # 24/7 daemon
+darwin brain           # 24/7 daemon; defaults to --kernel v3
+darwin brain --kernel v4 --workers auto --accelerator auto
 darwin connect         # chat client attached to a running brain
+darwin ingest-corpus   # ingest curated corpus into the v4 knowledge graph
 darwin export-training # export DLM (plan -> rendering) pairs
 ```
 
@@ -55,7 +57,20 @@ darwin live --memory ~/state.sqlite3 --interval 2.0
 | --- | --- | --- |
 | `--host` | `127.0.0.1` | bind interface |
 | `--port` | 9870 | TCP port |
+| `--kernel` | `v3` | `v3` uses `UniverseSimulation`; `v4` uses generated sandbox worlds |
+| `--workers` | `auto` | v4 scheduler worker setting surface |
+| `--accelerator` | `auto` | v4 scheduler accelerator setting surface |
 | `--quiet` | off | do not print events locally (chat clients still receive them when subscribed) |
+
+Example v4 brain:
+
+```bash
+darwin brain \
+  --kernel v4 \
+  --workers auto \
+  --accelerator auto \
+  --memory /tmp/darwin-v4.sqlite3
+```
 
 ### `darwin connect`
 
@@ -71,6 +86,27 @@ darwin connect --host 127.0.0.1 --port 9870
 | `--port` | 9870 | brain port |
 | `--watch-events` | off | subscribe to the brain's background event stream and mirror it into this window |
 | `--text-delay` | 0.0 | per-word delay for printed responses (0 = instant) |
+
+### `darwin ingest-corpus`
+
+Ingest a curated offline corpus into Darwin's v4 knowledge graph and generate
+candidate sandbox world specs from causal hypotheses.
+
+```bash
+darwin ingest-corpus \
+  --source wikidump \
+  --path /tmp/darwin-force.txt \
+  --memory /tmp/darwin-v4.sqlite3
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--source` | required | `wikipedia`, `wikidata`, or `wikidump` |
+| `--path` | required | local corpus file |
+| `--memory` | `darwin_memory.sqlite3` | SQLite memory file |
+
+`wikidump` currently uses the Wikipedia-style text extractor. `wikidata`
+currently expects newline-delimited JSON records.
 
 ### `darwin export-training`
 
@@ -103,6 +139,12 @@ These work in both `darwin live` and `darwin connect`.
 | `/beliefs` | strongest causal beliefs with confidence and sample counts |
 | `/concepts` | concept hierarchy (state, effect, affordance, strategy, meta, cluster) |
 | `/semantics` | recent parsed semantic frames (live only) |
+| `/knowledge QUERY` | v4 persisted knowledge-atom search |
+| `/hypotheses` | world-model hypotheses plus corpus causal hypotheses |
+| `/worlds` | generated v4 world specs and active adapter shape |
+| `/mind` | self-report plus v4 kernel metrics when running `--kernel v4` |
+| `/research status` | dormant live-research status |
+| `/why ID_OR_TEXT` | provenance for a knowledge atom or learned belief |
 | `/causal-graph` | distilled action → variable graph |
 | `/experiments` | active experiment proposals from the current state |
 | `/uncertainty` | latest per-action uncertainty scan |
