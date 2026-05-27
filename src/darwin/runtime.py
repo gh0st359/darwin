@@ -420,24 +420,25 @@ class DarwinRuntime:
             )
 
     def _handle_consolidation(self) -> RuntimeEvent | None:
-        """v5 kernel job: light maintenance pass on consolidated memory.
-
-        Phase F will expand this to call ``memory.consolidate_redundant_
-        beliefs()`` and ``decay_stale_concepts()``. For now it's a
-        lightweight tick that re-emits the dream summary without forcing
-        another full dream cycle.
-        """
+        """v5 kernel job: prune redundant concepts and decay stale ones."""
 
         with self._lock:
-            consolidation = self.darwin.memory.concepts.consolidate()
+            cluster_pass = self.darwin.memory.concepts.consolidate()
+            redundancy_pass = self.darwin.memory.consolidate_redundant_concepts()
+            decay_pass = self.darwin.memory.decay_stale_concepts(half_life_days=7.0)
             content = (
-                f"Consolidation: {len(consolidation.get('clusters_formed', []))} "
-                f"clusters formed, {len(consolidation.get('concepts_decayed', []))} concepts decayed."
+                f"Consolidation: pruned {redundancy_pass['removed']} redundant concepts, "
+                f"decayed {decay_pass['decayed']}, "
+                f"{redundancy_pass['remaining']} remain."
             )
             return self._event(
                 "consolidation",
                 content,
-                payload={"consolidation": consolidation},
+                payload={
+                    "clusters": cluster_pass,
+                    "redundancy": redundancy_pass,
+                    "decay": decay_pass,
+                },
                 loop="consolidation",
             )
 

@@ -271,6 +271,11 @@ class KernelDriver:
 
         if self.scheduler.queue_size() < self.replenish_floor:
             self._replenish()
+        # Phase F anti-thrash: if any kind's completion rate has dropped
+        # sharply over the last 10 minutes, lift it back up by enqueuing
+        # a priority-boosted job of that kind. This stops a long-running
+        # experiment from starving the dream/uncertainty loops.
+        self._lift_starved_kinds()
         job = self.scheduler.pop_next()
         if job is None:
             return
@@ -285,6 +290,28 @@ class KernelDriver:
             )
         finally:
             self.scheduler.complete(job)
+
+    def _lift_starved_kinds(self) -> None:
+        """Detect a sharp drop in any kind's recent completions and lift it.
+
+        We compare the last 10-minute window to the previous 10-minute
+        window. If the ratio dropped > 50%, enqueue a high-priority job
+        of that kind. The scheduler records this as a starvation_lift.
+        """
+
+        for kind in ("experiment", "simulation", "dream", "uncertainty", "consolidation"):
+            recent = self.scheduler.completion_rate(kind, window_seconds=600.0)
+            prior = self.scheduler.completion_rate(kind, window_seconds=1200.0) - recent
+            if prior <= 0 or recent / max(prior, 0.001) >= 0.5:
+                continue
+            self.scheduler.lift_starvation(kind)
+            self.scheduler.schedule(
+                KernelJob(
+                    kind=kind,
+                    priority=1.0,  # max bump
+                    payload={"source": "anti_thrash", "recent": recent, "prior": prior},
+                )
+            )
 
     def _dispatch(self, job: KernelJob) -> None:
         handler_name = JOB_HANDLERS.get(job.kind)
