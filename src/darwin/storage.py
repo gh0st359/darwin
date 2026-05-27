@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
@@ -508,6 +509,133 @@ class PersistentStore:
             for row in rows
         ]
 
+    # -- v5 self-mod ledger (Phase E) -------------------------------------
+
+    def record_self_mod(self, outcome: Any) -> int:
+        """Persist a ModificationOutcome to the v5 self_mod_ledger table.
+
+        Accepts either a ModificationOutcome dataclass or a mapping. The
+        ledger row is upserted by proposal_id so re-running the same
+        proposal during testing doesn't blow up.
+        """
+
+        if hasattr(outcome, "to_record"):
+            record = outcome.to_record()
+        else:
+            record = dict(outcome)
+        proposal_id = str(record.get("proposal_id", ""))
+        kind = str(record.get("kind", ""))
+        target = str(record.get("target", ""))
+        status = str(record.get("status", "proposed"))
+        rationale = str(record.get("rationale", ""))
+        payload = record.get("payload", {})
+        if not isinstance(payload, Mapping):
+            payload = {"value": payload}
+        sub_outcome = record.get("outcome", {})
+        baseline_error = float(sub_outcome.get("baseline_error", 0.0))
+        candidate_error = float(sub_outcome.get("candidate_error", 0.0))
+        ci_low = float(sub_outcome.get("ci_low", 0.0))
+        ci_high = float(sub_outcome.get("ci_high", 0.0))
+        applied_at = time.time() if status == "accepted" else None
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                insert into self_mod_ledger(
+                    proposal_id, kind, target, rationale, payload_json,
+                    baseline_error, candidate_error, ci_low, ci_high,
+                    status, applied_at, expires_at, reverted_at, notes
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict(proposal_id) do update set
+                    kind = excluded.kind,
+                    target = excluded.target,
+                    rationale = excluded.rationale,
+                    payload_json = excluded.payload_json,
+                    baseline_error = excluded.baseline_error,
+                    candidate_error = excluded.candidate_error,
+                    ci_low = excluded.ci_low,
+                    ci_high = excluded.ci_high,
+                    status = excluded.status,
+                    applied_at = excluded.applied_at,
+                    notes = excluded.notes
+                """,
+                (
+                    proposal_id,
+                    kind,
+                    target,
+                    rationale,
+                    dumps(dict(payload)),
+                    baseline_error,
+                    candidate_error,
+                    ci_low,
+                    ci_high,
+                    status,
+                    applied_at,
+                    None,
+                    None,
+                    str(sub_outcome.get("notes", "")),
+                ),
+            )
+            connection.commit()
+            return int(cursor.lastrowid)
+
+    def list_self_mods(
+        self,
+        limit: int = 50,
+        status: str | None = None,
+    ) -> list[dict[str, Any]]:
+        sql = (
+            "select proposal_id, kind, target, rationale, payload_json, "
+            "baseline_error, candidate_error, ci_low, ci_high, status, "
+            "applied_at, expires_at, reverted_at, notes, created_at "
+            "from self_mod_ledger"
+        )
+        params: tuple[Any, ...] = ()
+        if status:
+            sql += " where status = ?"
+            params = (status,)
+        sql += " order by id desc limit ?"
+        params = (*params, limit)
+        with self._connect() as connection:
+            rows = connection.execute(sql, params).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            payload = row["payload_json"]
+            try:
+                payload_dict = loads(payload) if payload else {}
+            except Exception:
+                payload_dict = {}
+            out.append(
+                {
+                    "proposal_id": row["proposal_id"],
+                    "kind": row["kind"],
+                    "target": row["target"],
+                    "rationale": row["rationale"],
+                    "payload": payload_dict,
+                    "baseline_error": row["baseline_error"],
+                    "candidate_error": row["candidate_error"],
+                    "ci_low": row["ci_low"],
+                    "ci_high": row["ci_high"],
+                    "status": row["status"],
+                    "applied_at": row["applied_at"],
+                    "expires_at": row["expires_at"],
+                    "reverted_at": row["reverted_at"],
+                    "notes": row["notes"],
+                    "created_at": row["created_at"],
+                    # convenience for /history rendering
+                    "accepted": row["status"] == "accepted",
+                    "improvement": (row["baseline_error"] or 0.0) - (row["candidate_error"] or 0.0),
+                }
+            )
+        return out
+
+    def mark_self_mod_quarantined(self, proposal_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "update self_mod_ledger set status = 'quarantined' where proposal_id = ?",
+                (proposal_id,),
+            )
+            connection.commit()
+
     def counts(self) -> dict[str, int]:
         tables = [
             "transitions",
@@ -523,6 +651,7 @@ class PersistentStore:
             "generated_experiments",
             "validation_results",
             "research_events",
+            "self_mod_ledger",
         ]
         with self._connect() as connection:
             return {
@@ -670,6 +799,25 @@ class PersistentStore:
                     url text not null,
                     payload text not null,
                     created_at text not null
+                );
+
+                create table if not exists self_mod_ledger (
+                    id integer primary key autoincrement,
+                    proposal_id text not null unique,
+                    kind text not null,
+                    target text not null,
+                    rationale text not null,
+                    payload_json text not null,
+                    baseline_error real not null default 0.0,
+                    candidate_error real not null default 0.0,
+                    ci_low real not null default 0.0,
+                    ci_high real not null default 0.0,
+                    status text not null,
+                    applied_at real,
+                    expires_at real,
+                    reverted_at real,
+                    notes text,
+                    created_at text default current_timestamp
                 );
                 """
             )

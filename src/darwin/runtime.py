@@ -80,7 +80,13 @@ class DarwinRuntime:
         self.logger = logger or StructuredLogger()
         self.dlm: DarwinLanguageModule = dlm or StubDLM()
         self.training_collector = training_collector or TrainingDataCollector()
-        self.self_mod_engine = SelfModificationEngine(darwin)
+        # Phase E wiring: engine knows about the runtime + store so it can
+        # propose realizer/kernel-priority tweaks and persist to the ledger.
+        self.self_mod_engine = SelfModificationEngine(
+            darwin,
+            runtime=self,
+            store=self.store,
+        )
         self.last_thought_trace: ThoughtTrace | None = None
         self.last_retrieval: RetrievalPacket | None = None
         self.last_response_plan: ResponsePlan | None = None
@@ -166,11 +172,19 @@ class DarwinRuntime:
         self.kernel_mode = "v5"
         self._stop.clear()
         self._kernel_driver = KernelDriver(self, self.kernel_scheduler)
+        # Phase E: replay accepted self-mods from the ledger BEFORE the
+        # driver starts pulling jobs. Darwin reconstitutes its tuned state
+        # every restart.
+        replay_summary: dict[str, int] = {}
+        try:
+            replay_summary = self.self_mod_engine.replay_ledger()
+        except Exception:
+            replay_summary = {}
         self._kernel_driver.start()
         self._event(
             "runtime",
             "Darwin's v5 kernel-driven cognition is running on one scheduler thread.",
-            payload={"kernel": "v5"},
+            payload={"kernel": "v5", "ledger_replay": replay_summary},
             loop="main",
         )
 
