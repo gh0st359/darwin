@@ -1,11 +1,18 @@
 flowchart LR
-    Kernel["Darwin kernel<br/>owns reasoning"]
-    Plan["ResponsePlan<br/>closed structured payload"]
-    Gemma["Gemma / DLM<br/>renders prose only"]
-    Validator["FaithfulnessValidator<br/>rejects unsupported output"]
-    Composer["deterministic composer fallback"]
-    User["user"]
+    Engine["SelfModificationEngine"]
+    Propose["propose_*: min_samples, exploration_rate,<br/>realizer.config, kernel.priority_weight"]
+    Holdout["holdout_size=64<br/>per-sample errors"]
+    Bootstrap["paired_bootstrap_ci<br/>1000 resamples, 95% CI"]
+    Accept{"ci_low > 0<br/>OR<br/>relative >= 0.05?"}
+    Ledger["self_mod_ledger<br/>(kind, payload, ci_low, ci_high, status, applied_at)"]
+    Replay["replay_ledger() on startup"]
+    Bounds["SAFETY_BOUNDS<br/>per-kind (min, max)"]
+    Mind["Darwin v5"]
 
-    Kernel --> Plan --> Gemma --> Validator
-    Validator -->|valid| User
-    Validator -->|invalid| Composer --> User
+    Engine --> Propose --> Holdout --> Bootstrap --> Accept
+    Accept -- "yes" --> Ledger
+    Accept -- "no" --> Engine
+    Ledger -. "on next boot" .-> Replay
+    Replay --> Bounds
+    Bounds -- "within bounds" --> Mind
+    Bounds -- "out of bounds" --> Ledger

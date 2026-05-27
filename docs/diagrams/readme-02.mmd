@@ -1,15 +1,14 @@
-flowchart TB
-    Brain["darwin brain"]
-    V3["--kernel v3<br/>UniverseSimulation<br/>room / math / space / time"]
-    V4["--kernel v4<br/>GenerativeUniverse<br/>sandboxed generated worlds"]
-    Kernel["Darwin causal kernel<br/>CausalModel + Memory + WorldModel + SelfModel + DiscoursePlanner"]
-    Plan["ResponsePlan"]
-    Validator["FaithfulnessValidator + ResponseCritic"]
-    Mouth["StubDLM or GemmaDLM"]
-    Connect["darwin connect"]
+flowchart LR
+    Corpus["curated corpus<br/>force, mass, acceleration"]
+    Atoms["KnowledgeAtoms<br/>causal_hypothesis / relation / quantity"]
+    Generator["WorldSpecGenerator<br/>groups by shared object slug"]
+    Composite["composite WorldSpec<br/>2+ actions, derived rule, invariants"]
+    Compiler["SandboxedWorldCompiler<br/>validates ExpressionSpec AST"]
+    Adapter["SandboxedGeneratedAdapter<br/>step -> derived fixed point -> invariants"]
+    Counterfactual["counterfactual(action)<br/>state copy, never commits"]
+    Experiment["Darwin experiment"]
 
-    Brain --> V3
-    Brain --> V4
-    V3 --> Kernel
-    V4 --> Kernel
-    Kernel --> Plan --> Validator --> Mouth --> Connect
+    Corpus --> Atoms --> Generator --> Composite --> Compiler --> Adapter
+    Adapter --> Experiment
+    Adapter --> Counterfactual
+    Adapter -. "invariant violation -> negative reward" .-> Experiment

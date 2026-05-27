@@ -1,14 +1,20 @@
-flowchart LR
-    Corpus["curated offline corpus<br/>wikipedia | wikidata | wikidump"]
-    Atoms["KnowledgeAtom<br/>definition / relation / quantity / alias / causal_hypothesis"]
-    Graph["KnowledgeGraph<br/>persisted, queryable, provenance-backed"]
-    Generator["WorldSpecGenerator<br/>hypotheses -> data-only schemas"]
-    Compiler["SandboxedWorldCompiler<br/>validate before activation"]
-    Adapter["GenerativeUniverseAdapter<br/>existing EnvironmentAdapter protocol"]
-    Runtime["Darwin Runtime<br/>experiments, simulation, dream, self-modification, uncertainty"]
-    Plan["ResponsePlan<br/>structured answer plan"]
-    DLM["DLM / Gemma<br/>mouth only"]
-    User["user"]
+flowchart TB
+    Brain["darwin brain --kernel v5"]
+    Driver["KernelDriver<br/>single thread, priority queue"]
+    Scheduler["ActorScheduler<br/>heapq, saturation caps, anti-thrash"]
+    Jobs["jobs:<br/>experiment / simulation / dream<br/>self_modification / uncertainty / consolidation"]
+    Worlds["v5 GenerativeUniverse<br/>composite worlds, derived rules, invariants, counterfactuals"]
+    Kernel["Darwin kernel<br/>CausalModel + Memory + WorldModel + SelfModel"]
+    Introspector["SelfIntrospector<br/>SystemIdentity + ModuleDescriptors"]
+    Ledger["self_mod_ledger<br/>declarative, persistent, replayable"]
+    Plan["ResponsePlan"]
+    Realizer["DiscourseRealizer<br/>symbolic, deterministic, LLM-free"]
+    Validator["FaithfulnessValidator<br/>content-word audit"]
+    Connect["darwin connect"]
 
-    Corpus --> Atoms --> Graph --> Generator --> Compiler --> Adapter --> Runtime --> Plan --> DLM --> User
-    Plan -. "validator rejects unsupported rendering" .-> DLM
+    Brain --> Driver --> Scheduler --> Jobs
+    Jobs --> Worlds --> Kernel
+    Kernel --> Introspector
+    Kernel --> Ledger
+    Kernel --> Plan --> Realizer --> Validator --> Connect
+    Ledger -. "auto-replay on startup" .-> Kernel

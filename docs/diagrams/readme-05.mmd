@@ -1,0 +1,12 @@
+flowchart LR
+    SelfReport["SelfModel.report()<br/>learning_priority + competence"]
+    Replenish["KernelDriver._replenish<br/>match priority to kind"]
+    Schedule["scheduler.schedule(job)<br/>heapq push"]
+    Tick["scheduler.tick()<br/>saturation guard + anti-thrash"]
+    Handler["runtime handler<br/>experiment / simulation / dream / ..."]
+    Metrics["KernelMetrics<br/>completions_by_kind, saturation_skips, starvation_lifts"]
+    Engine["self_mod proposes against<br/>scheduler weights + realizer config"]
+
+    SelfReport --> Replenish --> Schedule --> Tick --> Handler --> Metrics
+    Metrics -. "feed back to engine" .-> Engine
+    Engine -. "tune knobs" .-> Replenish

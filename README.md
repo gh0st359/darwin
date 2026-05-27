@@ -2,172 +2,132 @@
 
 Darwin is an experimental causal-adaptive AI system. It is not an LLM, not a
 prompt chain, and not an API wrapper. The goal is a mind that learns through
-experience, keeps an inspectable causal/conceptual model, and uses a language
-renderer only as a mouth.
+experience, keeps an inspectable causal/conceptual model, and owns its own
+language end-to-end.
 
-The current branch is **v4: Generative Universe Kernel**.
+The current branch is **v5: Self-Aware Generative Kernel**.
 
-v4 adds a new path where Darwin is no longer centered on a hand-coded room or a
-fixed set of toy domains. It can ingest a curated offline corpus, extract
-provenance-backed knowledge atoms, generate sandboxed simulation worlds from
-causal hypotheses, run experiments in those worlds, and promote claims only
-after generated experience supports them.
+v5 builds on v4's corpus → atoms → generated worlds substrate and pushes hard
+toward five things that v4 only set up scaffolding for: (a) Darwin being aware
+of itself as an AI system, (b) generated worlds rich enough to express real
+relations between variables, (c) zero LLM in the language pipeline, (d)
+self-modification that actually accepts proposals and persists them, and (e)
+a kernel that schedules cognition by priority rather than fixed timers.
 
-This is a foundation, not a claim of finished universal sentience. The important
-change is the substrate: Darwin now has a data pipeline for growing its own
-testable world model without making Gemma, or any other LLM, responsible for the
-reasoning.
+## v5 in one picture
 
-## The core idea
+![Readme](docs/diagrams/readme-01.svg)
 
-Darwin v4 separates four things that used to blur together:
+The kernel owns the reasoning. The realizer owns the words. The ledger owns
+Darwin's history of self-tuning. None of those paths touches an LLM.
 
-1. **Corpus claims**
-   - Facts, definitions, aliases, relations, quantities, and causal phrases
-     extracted from curated local files.
-   - Stored as `KnowledgeAtom` records.
-   - Always carry provenance: source file, source type, extractor, confidence,
-     and capture time.
+## What changed in v5
 
-2. **Hypotheses**
-   - Corpus claims can propose possible causes and relations.
-   - They are not automatically treated as causal truth.
-   - Example: `Force causes acceleration` becomes a causal hypothesis.
+v5 lands in six phases (A → F), each its own commit on the `v5` branch.
 
-3. **Generated worlds**
-   - Darwin converts causal hypotheses into data-only `WorldSpec` records.
-   - These are not trusted Python code.
-   - A world spec must pass sandbox validation before Darwin can act in it.
+### Phase A — Self-awareness substrate
 
-4. **Promoted beliefs**
-   - When Darwin runs an experiment in a generated world, the supporting
-     provenance can be marked as promoted.
-   - This keeps corpus-derived information separate from observed/generated
-     experience.
+`SelfIntrospector` lives next to `SelfModel`. Where `SelfModel` tracks
+competence and learning priority, the introspector builds a `SystemIdentity`
+at runtime that names what Darwin *is*: kernel mode, realizer kind, git
+sha, memory path, and a `ModuleDescriptor` per active subsystem. Three new
+chat commands surface it: `/identity`, `/architecture`, `/history`.
 
-Gemma, when enabled, is still only the DLM: Darwin Language Module. It receives
-structured response plans and renders them as prose. The validator can reject
-drift and fall back to deterministic output.
+The v3 `Goal(desired={room.room_bright: True, ...})` leak is removed on the
+v5 path — the goal surface is open until the kernel's curriculum scheduler
+picks a target from the current learning priority.
 
-## v4 architecture overview
+### Phase B — Rich simulation substrate
 
-![Darwin v4 architecture overview](docs/diagrams/readme-01.svg)
+Generated worlds in v4 were integer counters: each causal hypothesis became
+one action that bumped one variable by `+= 1`. v5 adds a typed expression
+AST (`ExpressionSpec`), new rule operations (`compute`, `clamp`, `if_then`),
+derived rules that re-run to fixed point, and post-step invariants. Multiple
+hypotheses that share an effect variable now compose into one world whose
+derived rule wires them together.
 
-The important boundary is between `ResponsePlan` and the DLM. Darwin's
-reasoning path is the symbolic/causal kernel. Gemma can make the wording nicer,
-but it does not choose claims, create causal beliefs, or decide what Darwin
-knows.
+A corpus of "Force causes acceleration" + "Mass resists acceleration"
+no longer produces two disconnected counter-bumping worlds. It produces a
+single `generated/composite_acceleration` world with two actions and a
+derived rule `acc := force / max(mass, 1)` — the F=m·a relation, emergent
+from the corpus, sandbox-validated, run by the kernel.
 
-## What changed in v4
+![Readme](docs/diagrams/readme-02.svg)
 
-### New data substrate
+Three SQLite tables that v4 scaffolded but never filled
+(`generated_experiments`, `validation_results`, `research_events`) are now
+populated by the ingest path and the kernel.
 
-SQLite now stores v4 knowledge and world-growth data:
+### Phase C — LLM-free DiscourseRealizer
 
-- `knowledge_atoms`
-- `world_specs`
-- `generated_experiments`
-- `validation_results`
-- `research_events`
+This is the largest single piece of work in v5. The Gemma DLM is removed
+from the v5 inference path entirely. No model weights, no token sampling,
+no HTTP call to ollama, nothing. A deterministic symbolic
+`DiscourseRealizer` composes every utterance from `ResponsePlan` fields by
+rhetorical strategies.
 
-The store enables WAL mode for better concurrent read/write behavior.
+Every content word in the output must trace either to a plan field (or a
+small set of morphological variants) or to a fixed structural vocabulary
+of function words + connectors. `FaithfulnessValidator.check_content_words`
+audits the output token-by-token. Variety comes from plan content
+fingerprints, Darwin's current cognitive state, and a `StarterRegistry`
+that avoids repeating recent sentence openers — never from sampling.
 
-### Corpus ingestion
+![Readme](docs/diagrams/readme-03.svg)
 
-New command:
+The acronym DLM is reinterpreted: **Darwinian Learning Module**. Language is
+now part of the learning loop, tunable by self-modification, not a separate
+mouth bolted on.
 
-```bash
-darwin ingest-corpus --source wikidump --path PATH --memory PATH
-```
+`--dlm gemma` is rejected on `--kernel v5` with a pointer to the realizer.
+v3 and v4 paths keep `GemmaDLM` working unchanged.
 
-Supported sources today:
+### Phase D — Activated kernel
 
-- `wikipedia`
-- `wikidump` (treated as Wikipedia-style text)
-- `wikidata` (newline-delimited JSON records)
+`ActorScheduler` in v4 was scaffolding: `runtime.py` ran five fixed-interval
+daemon threads and never called the scheduler. v5 replaces those five
+threads with one `KernelDriver` thread that pulls priority-ordered jobs from
+a real heapq-backed scheduler. Per-kind saturation caps prevent any one
+loop from dominating; the priority formula is
+`0.6 * uncertainty + 0.3 * learning_priority_match + 0.1 * age`. `kernel_metrics` is finally non-zero.
 
-The extractor is deterministic. It looks for simple, explicit structures:
+The same `_loop_experiment` / `_loop_simulation` / `_loop_dream` /
+`_loop_self_modification` / `_loop_uncertainty` methods double as job
+handlers; a new `_handle_consolidation` lands for Phase F. Nothing in
+Darwin's reasoning had to change — only the trigger surface.
 
-- headings like `== Force ==`
-- definitions like `Force is an interaction that changes motion.`
-- aliases like `Aliases: push, pull`
-- causal language like `Force causes acceleration.`
-- Wikidata-style `label`, `description`, `aliases`, and `claims`
+### Phase E — Self-modification that actually fires
 
-The extractor is intentionally conservative. It creates atoms and hypotheses;
-it does not invent broad conclusions.
+v4's accept gate was `improvement > 0.0` strict on a 12-sample integer-delta
+holdout. The difference almost never exceeded zero, so every proposal
+rejected. v5 rewrites the gate to a paired-bootstrap CI on per-sample
+deltas (1000 resamples, 95% CI) with a 5% relative-improvement fallback,
+on a 64-sample holdout. Proposals are now **declarative**: each kind has
+an `(apply_factory, revert_factory)` pair in `_PROPOSAL_REGISTRY` that
+reconstructs the closure purely from the payload dict, so an accepted
+ledger row replays exactly.
 
-### Generative universe
+![Readme](docs/diagrams/readme-04.svg)
 
-New v4 runtime path:
+Two new proposal kinds let Darwin tune its own substrate:
+`realizer.config` (connector frequency, aside rate, qualifier strength)
+and `kernel.priority_weight` (the scheduler's formula). On every restart,
+`replay_ledger()` re-applies every accepted self-mod in `applied_at`
+order, quarantining any payload that no longer fits its declared
+`SAFETY_BOUNDS`. Darwin is a different mind each session.
 
-```bash
-darwin brain --kernel v4
-```
+### Phase F — Continuous compounding
 
-When v4 starts, Darwin builds a `GenerativeUniverseAdapter` from persisted
-`WorldSpec` records. If no specs exist yet, it tries to generate them from the
-knowledge graph. If the memory is empty, it starts with a tiny data-only
-bootstrap world so the brain can still run.
+`Memory.consolidate_redundant_concepts` collapses concepts with the same
+`(kind, level, name)` signature down to the strongest-support copy.
+`Memory.decay_stale_concepts` shrinks support over a configurable half-life
+and drops anything that falls below 1. Both run inside the new
+`consolidation` kernel job.
 
-Generated worlds are data specs with:
-
-- concepts
-- initial state variables
-- generated actions
-- allowed rule operations
-- provenance ids
-- step budget
-- sandbox trust level
-
-Allowed rule operations today:
-
-- `add`
-- `set`
-- `toggle`
-
-Rejected world specs include:
-
-- specs that claim to contain code
-- non-sandboxed specs
-- invalid variable names
-- generated actions without the `generated/` prefix
-- unsupported rule operations
-
-### Unified knowledge-aware conversation
-
-When you ask Darwin what it knows or understands, the discourse planner now
-queries the unified knowledge graph before falling back to legacy domain belief
-lists. That is the immediate practical fix for the old "everything is curtains"
-failure mode.
-
-Example response after ingesting a tiny force corpus:
-
-```text
-you> What do you know about force?
-darwin> Force is an interaction that changes motion (source: wikipedia). Force causes acceleration (source: wikipedia).
-```
-
-### Introspection commands
-
-v4 adds commands for seeing the mind's current knowledge and generated worlds:
-
-```text
-/knowledge QUERY     query the v4 knowledge graph
-/hypotheses          show causal and corpus hypotheses
-/worlds              show generated v4 world specs and active adapter shape
-/mind                show self-report plus kernel/worker metrics
-/research status     show dormant live research status
-/why ID_OR_TEXT      explain provenance for a knowledge atom or belief
-```
-
-### Dormant live research
-
-There is now a live research subsystem, but it is disabled by default. In this
-branch it cannot fetch the web unless explicitly enabled in future work. That is
-intentional: live sources should never become beliefs directly, and the system
-needs provenance, trust, contradiction, and poisoning checks before web research
-is allowed into the loop.
+`KernelDriver._lift_starved_kinds` compares each kind's last-10-min
+completion rate to its prior 10-min rate; a > 50% drop schedules a
+priority-1.0 job of that kind. The scheduler records every such lift in
+`KernelMetrics.starvation_lifts` so the self-mod loop has a real signal.
 
 ## Quick start
 
@@ -175,107 +135,57 @@ Install and test:
 
 ```bash
 pip install -e .
-python -m unittest discover -s tests
+python3 -m unittest discover -s tests
 ```
 
-Run the existing v3 brain:
+Run the v5 brain — no LLM required:
 
 ```bash
-darwin brain
+darwin brain --kernel v5
 darwin connect
 ```
 
-Run the v4 generative kernel:
+Ingest a corpus and watch the composite world emerge:
 
 ```bash
-darwin brain --kernel v4
-darwin connect
-```
-
-Use Gemma as the mouth:
-
-```bash
-ollama pull gemma3:270m
-darwin brain --kernel v4 --dlm gemma --dlm-backend ollama --dlm-model gemma3:270m
-darwin connect
-```
-
-Gemma is optional. Darwin's reasoning path remains the symbolic/causal kernel.
-
-## Try v4 with a tiny corpus
-
-Create a small local corpus:
-
-```bash
-cat > /tmp/darwin-force.txt <<'EOF'
+cat > /tmp/v5-physics.txt <<'EOF'
 == Force ==
 Force is an interaction that changes motion.
 Force causes acceleration.
-Aliases: push, pull
+
+== Mass ==
+Mass is a measure of matter.
+Mass resists acceleration.
+Aliases: inertia
+
+== Acceleration ==
+Acceleration is the rate of change of velocity.
 EOF
-```
-
-Ingest it:
-
-```bash
-darwin ingest-corpus --source wikidump --path /tmp/darwin-force.txt --memory /tmp/darwin-v4.sqlite3
-```
-
-Start the v4 brain:
-
-```bash
-darwin brain --kernel v4 --workers auto --accelerator auto --memory /tmp/darwin-v4.sqlite3
-```
-
-In another terminal:
-
-```bash
-darwin connect
-```
-
-Ask:
-
-```text
-you> What do you know about force?
-you> /knowledge force
-you> /hypotheses
-you> /worlds
-you> /mind
-you> /research status
-```
-
-Stop the brain from the chat window:
-
-```text
-/shutdown-brain
-```
-
-## Using a separate memory file
-
-For experiments, use a separate SQLite file so you do not mix memories:
-
-```bash
-darwin ingest-corpus --source wikidump --path /tmp/darwin-force.txt --memory /tmp/darwin-v4.sqlite3
-darwin brain --kernel v4 --memory /tmp/darwin-v4.sqlite3 --port 9999
+darwin ingest-corpus --source wikidump --path /tmp/v5-physics.txt --memory /tmp/v5.sqlite3
+darwin brain --kernel v5 --memory /tmp/v5.sqlite3 --port 9999
 darwin connect --port 9999
 ```
 
-## Wikidata-style input
+In the chat window:
 
-`--source wikidata` currently expects newline-delimited JSON. Example:
-
-```json
-{"id":"Q1","label":"Force","description":"interaction that changes motion","aliases":["push","pull"],"claims":{"causes":["acceleration"],"measured_by":["newton"]}}
+```text
+you> /identity
+you> /architecture
+you> /worlds
+you> /causal-graph
+you> /history 20
+you> What are you?
+you> What is the relationship between force and mass?
+you> /why composite.acceleration
 ```
 
-Ingest:
+After a sustained run, `/mind` shows `kernel_metrics` with non-zero
+`jobs_completed`, `experiments_per_minute`, and `completions_by_kind` for
+every kind. After a restart against the same memory file, `/history`
+shows the replayed self-modifications and Darwin's tuned state persists.
 
-```bash
-darwin ingest-corpus --source wikidata --path /path/to/items.jsonl
-```
-
-This is not yet a full production Wikidata dump importer. It is a deterministic
-starting point for curated snapshots and fixtures.
+`--dlm gemma` is no longer needed (and is rejected on v5). v3 and v4 still
+support `--dlm gemma` and the Gemma path if you want to compare.
 
 ## CLI reference
 
@@ -284,38 +194,46 @@ Core commands:
 ```text
 darwin run --steps 40 --seed 7
 darwin live
-darwin brain
+darwin brain --kernel v5
 darwin brain --kernel v4 --workers auto --accelerator auto
+darwin brain --kernel v3
 darwin connect
 darwin connect --watch-events
-darwin ingest-corpus --source wikidump --path PATH
+darwin ingest-corpus --source wikidump --path PATH --memory PATH
 darwin export-training --min-quality 0.7
 ```
 
 Brain options:
 
 ```text
---kernel v3|v4       v3 uses the unified hand-built universe; v4 uses generated worlds
---workers auto       v4 scheduler worker setting placeholder/interface
---accelerator auto   v4 accelerator setting placeholder/interface
---memory PATH        SQLite memory file
---interval SECONDS   background loop interval
---dlm stub|gemma     deterministic composer or Gemma renderer
---quiet              suppress local brain event printing
+--kernel v3|v4|v5    v3 = hand-built universe; v4 = generated worlds with
+                     fixed-interval daemons; v5 = generated worlds + kernel-
+                     driven scheduler + symbolic realizer + ledger replay
+--memory PATH        SQLite memory file (default: darwin_memory.sqlite3)
+--port N             TCP port for clients (default: 9870)
+--interval SECONDS   v3/v4 background loop interval (ignored on v5)
+--workers N          v4 / v5 scheduler worker count
+--accelerator auto   placeholder for future Metal/MLX acceleration
+--dlm stub|gemma     v3/v4 only; v5 rejects --dlm gemma
+--quiet              suppress local brain-event printing
 ```
 
 Chat commands:
 
 ```text
-/status              self-model
+/identity            structural self-image (name, version, kernel, modules)
+/architecture        every module with role, class, public methods, state
+/history N           recent self-modification ledger entries
+/status              self-model report
 /beliefs             strongest causal beliefs
-/beliefs math        strongest causal beliefs in one domain
-/universe            active v3 embodiment domains
-/worlds              generated v4 worlds and active adapter shape
+/beliefs DOMAIN      strongest beliefs in one domain
+/universe            active embodiment domains
+/worlds              generated world specs + active adapter shape
 /knowledge QUERY     query persisted knowledge atoms
-/hypotheses          causal and corpus hypotheses
+/hypotheses          causal + corpus hypotheses
 /why ID_OR_TEXT      provenance for a knowledge atom or belief
-/mind                self-report plus v4 kernel metrics
+/mind                self-report plus kernel/worker metrics
+/loops               on v5: kernel kind/in_flight/completed/rate. else: fixed loops.
 /research status     dormant live research status
 /concepts            concept hierarchy
 /experiments         active experiment proposals
@@ -324,9 +242,8 @@ Chat commands:
 /simulate            run one mental simulation now
 /selfmod             propose and test self-modifications
 /uncertainty         per-action uncertainty scan
-/loops               background loop status
 /causal-graph        distilled action -> variable graph
-/dlm                 DLM info and last render validation
+/dlm                 DLM info + last render validation
 /training            DLM training-data corpus summary
 /metrics             structured-logger metrics
 /thoughts            last internal thought trace
@@ -337,171 +254,124 @@ Chat commands:
 /shutdown-brain      stop the brain daemon
 ```
 
-## Architecture details
+## Architecture in detail
 
-Runtime selection:
+The v5 cognitive loop has one more level of indirection than v4: the
+scheduler stands between the runtime's background loops and the wall clock.
 
-![Runtime selection: v3 vs v4 kernel through connect](docs/diagrams/readme-02.svg)
+![Readme](docs/diagrams/readme-05.svg)
 
-Belief promotion:
-
-![Belief promotion from corpus claim to generated experiment](docs/diagrams/readme-03.svg)
-
-DLM boundary:
-
-![DLM boundary: ResponsePlan, Gemma, validator, composer fallback](docs/diagrams/readme-04.svg)
-
-## What v4 is not yet
-
-This branch is a working foundation, not the full destination.
-
-Implemented now:
-
-- offline curated corpus ingestion
-- provenance-rich knowledge atoms
-- simple deterministic extraction
-- generated sandbox world specs
-- v4 brain mode
-- knowledge-aware chat answers
-- v4 introspection commands
-- disabled live research interface
-- tests for promotion boundaries and DLM faithfulness boundaries
-- v4 scheduler/metrics surface via `ActorScheduler`
-
-Still future work:
-
-- full-scale Wikipedia/Wikidata dump processing
-- richer entity linking and contradiction resolution
-- a complete actor runtime replacing the old fixed background loops
-- real loop-avoidance scheduling beyond the current metrics surface
-- richer world generation with invariants and experiment templates
-- optional Metal/MLX acceleration
-- live web research activation with trust and poisoning gates
-- stronger benchmark-driven self-modification gates
+The realizer reads the same `ResponsePlan` shape v4 used. The
+`FaithfulnessValidator` keeps its old structural checks (notation leak,
+forbidden phrases, length sanity) and adds the strict content-word audit
+on top. The composer fallback survives so a malformed plan can still
+produce a grounded sentence.
 
 ## Persistence
 
 Default durable files:
 
 - `darwin_memory.sqlite3` stores transitions, concepts, thoughts, chat,
-  experiments, semantic frames, self-modification proposals, knowledge atoms,
-  world specs, generated experiments, validation results, and research events.
-- `darwin_runtime_state.json` stores runtime-loop posture.
-- `training_logs/*.jsonl` stores plan logs, background-cognition logs, metrics,
-  and DLM training pairs.
+  experiments, semantic frames, knowledge atoms, world specs, generated
+  experiments, validation results, research events, and the v5
+  `self_mod_ledger`.
+- `darwin_runtime_state.json` stores per-loop posture (used by the v3/v4
+  fixed-interval drivers; v5 doesn't write to it).
+- `training_logs/*.jsonl` stores plan logs, background-cognition logs,
+  structured metrics, and DLM training pairs from v3/v4 runs.
 
-Kill and restart the brain with the same memory file and Darwin reloads its
-stored knowledge and generated world specs.
+Kill and restart `darwin brain --kernel v5` against the same memory file
+and Darwin reloads transitions, world specs, knowledge atoms, and replays
+every accepted self-mod from the ledger.
+
+## What v5 is not yet
+
+This branch is a working foundation, not the full destination.
+
+Implemented now:
+
+- Self-aware structural identity grounded in live module introspection
+- Multi-hypothesis composite world generation with derived rules and invariants
+- Counterfactual rollouts on generated worlds
+- LLM-free symbolic discourse realizer with content-word grounded validation
+- Priority-scheduled kernel with saturation caps and anti-thrash
+- Paired-bootstrap accept gate for self-modification
+- Persistent self-mod ledger with auto-replay and SAFETY_BOUNDS quarantine
+- Memory consolidation and stale-concept decay
+- All previously-scaffolded v4 tables (`generated_experiments`,
+  `validation_results`, `research_events`, `self_mod_ledger`) populated
+  end-to-end
+- Tests: 133 tests across the v3, v4, and v5 paths, all green
+
+Still future work:
+
+- Full-scale Wikipedia / Wikidata dump processing
+- Richer entity linking and contradiction resolution
+- Active reading: live research with trust, contradiction, and poisoning gates
+- Curriculum-driven world generation beyond simple composite rules
+- Realizer self-mod targets beyond connector frequency / aside rate / qualifier strength
+- Distributed scheduler workers behind the same `ActorScheduler` interface
 
 ## Repository map
 
 ```text
 docs/
-  ARCHITECTURE.md       older system architecture
-  V2_ARCHITECTURE.md    v2 architecture deep-dive
+  ARCHITECTURE.md            older architecture notes
+  V4_*.md                    v4 deep-dives (corpus ingestion, sandboxed worlds, ...)
+  diagrams/                  rendered Mermaid SVGs + source .mmd files
 src/darwin/
-  agent.py              Darwin orchestration
-  causal.py             causal transition learner
-  causal_chain.py       multi-step causal chains
-  cli.py                command-line entrypoint
-  composer.py           deterministic language realizer
-  concepts.py           concept formation
-  critic.py             response critique
-  discourse.py          ResponsePlan creation and knowledge-aware answers
-  dlm.py                StubDLM, GemmaDLM, faithfulness validation
-  embodiment.py         v3 embodiment adapters
-  experiments.py        experiment proposal/evaluation
-  generative.py         v4 generated world specs and sandbox adapter
-  instrumentation.py    structured logging
-  kernel.py             v4 scheduler/metrics surface
-  knowledge.py          v4 corpus ingestion and knowledge graph
-  language.py           legacy state-grounded language cortex
-  memory.py             episodic and semantic memory
-  planner.py            consequence-aware planner
-  research.py           dormant live research subsystem
-  retrieval.py          memory retrieval
-  runtime.py            background cognition loops
-  self_model.py         metacognition and learning priorities
-  self_modification.py  gated self-modification engine
-  semantics.py          symbolic language parser
-  server.py             brain daemon and TCP client
-  storage.py            SQLite durable memory
-  streaming.py          incremental text output
-  thought.py            inspectable thought traces
-  training_data.py      DLM training-pair collection
-  types.py              shared data structures
-  world_model.py        structured hypotheses
-  worlds.py             v3 test environments and unified universe
+  agent.py                   Darwin orchestration; constructs SelfIntrospector
+  causal.py                  causal transition learner
+  causal_chain.py            multi-step causal chains
+  cli.py                     command-line entrypoint; v5 wires
+  composer.py                deterministic baseline language realizer (v3/v4)
+  concepts.py                concept formation
+  connectors.py              v5: function-word + connector vocabulary
+  critic.py                  response critique
+  discourse.py               ResponsePlan + DiscoursePlanner
+  dlm.py                     StubDLM, GemmaDLM (v3/v4), SymbolicRealizerDLM (v5)
+  embodiment.py              v3/v4/v5 embodiment adapters
+  experiments.py             experiment proposal/evaluation
+  generative.py              v5: ExpressionSpec, derived rules, invariants,
+                             composite world generation, counterfactual
+  instrumentation.py         structured logging
+  kernel.py                  v5: heapq ActorScheduler + KernelDriver +
+                             anti-thrash + priority formula
+  knowledge.py               v5: KnowledgeGraph with relations_for/quantities_for
+  language.py                legacy state-grounded language cortex
+  memory.py                  v5: consolidate_redundant_concepts, decay
+  planner.py                 consequence-aware planner
+  realizer.py                v5: symbolic DiscourseRealizer pipeline
+  research.py                dormant live research subsystem
+  retrieval.py               memory retrieval
+  runtime.py                 v5: start_v5() + _handle_consolidation
+  self_awareness.py          v5: SystemIdentity, ModuleDescriptor, SelfIntrospector
+  self_model.py              metacognition and learning priorities
+  self_modification.py       v5: paired-bootstrap gate + declarative
+                             _PROPOSAL_REGISTRY + replay_ledger
+  semantics.py               symbolic language parser
+  server.py                  brain daemon and TCP client
+  storage.py                 v5: self_mod_ledger, list_self_mods, ...
+  streaming.py               incremental text output (v3/v4)
+  thought.py                 inspectable thought traces
+  training_data.py           DLM training-pair collection
+  types.py                   shared data structures
+  world_model.py             structured hypotheses
+  worlds.py                  v3 test environments
 tests/
-  test_v4_generative_universe.py
-  plus regression coverage for v1-v3 behavior
+  test_v5_self_awareness.py  Phase A
+  test_v5_worlds.py          Phase B
+  test_v5_realizer.py        Phase C
+  test_v5_kernel.py          Phase D
+  test_v5_self_mod.py        Phase E
+  test_v5_continuous.py      Phase F
+  test_v4_generative_universe.py and all v1-v3 regressions
 ```
-
-## More v4 documentation
-
-- [docs/V4_GENERATIVE_UNIVERSE.md](docs/V4_GENERATIVE_UNIVERSE.md) - the full
-  corpus-to-world architecture.
-- [docs/V4_CORPUS_INGESTION.md](docs/V4_CORPUS_INGESTION.md) - supported input
-  shapes, atom types, and provenance rules.
-- [docs/V4_SANDBOXED_WORLDS.md](docs/V4_SANDBOXED_WORLDS.md) - `WorldSpec`,
-  validation, generated adapters, and belief promotion.
-- [docs/V4_DLM_BOUNDARY.md](docs/V4_DLM_BOUNDARY.md) - why Gemma is a mouth, not
-  the mind.
-
-## Troubleshooting
-
-### `darwin connect` cannot connect
-
-Start the daemon first:
-
-```bash
-darwin brain --kernel v4 --memory /tmp/darwin-v4.sqlite3
-darwin connect
-```
-
-If the default port is busy, pick a port in both terminals:
-
-```bash
-darwin brain --kernel v4 --port 9999
-darwin connect --port 9999
-```
-
-### Corpus ingest creates atoms but no useful worlds
-
-`WorldSpecGenerator` currently generates worlds from `causal_hypothesis` atoms.
-Make sure the corpus contains explicit causal sentences such as:
-
-```text
-Force causes acceleration.
-Acceleration changes velocity.
-```
-
-Definitions like `Force is an interaction...` are stored as knowledge, but they
-do not become generated worlds by themselves.
-
-### Darwin answers from the corpus but does not treat it as proven
-
-That is expected. Corpus claims are provenance-backed knowledge atoms. They can
-propose hypotheses, but causal support is promoted only after Darwin runs an
-experiment in a generated sandbox world.
-
-### Gemma is unavailable or rejected
-
-Use the default `--dlm stub` if you do not have a local Gemma backend. If
-`--dlm gemma` is enabled and the renderer drifts from the plan,
-`FaithfulnessValidator` rejects it and Darwin falls back to the deterministic
-composer.
-
-### Live research appears disabled
-
-That is intentional in v4. `LiveResearcher` exists as a dormant subsystem, but
-`fetch()` raises unless future work explicitly enables live sources with trust,
-provenance, contradiction, and poisoning gates.
 
 ## Development checks
 
 ```bash
-python -m unittest discover -s tests
+python3 -m unittest discover -s tests
 ```
 
-Current suite on this branch: 69 tests.
+Current suite on this branch: 133 tests, all passing.

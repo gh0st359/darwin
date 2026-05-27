@@ -41,7 +41,7 @@ def process_file(path: Path) -> int:
     offset = 0
     for index, match in enumerate(matches, start=1):
         source = match.group(1).strip() + "\n"
-        slug = slugify(path.relative_to(ROOT), index)
+        slug = slugify(path, index)
         mmd_path = DIAGRAMS / f"{slug}.mmd"
         svg_path = DIAGRAMS / f"{slug}.svg"
         mmd_path.write_text(source, encoding="utf-8")

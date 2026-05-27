@@ -1,10 +1,12 @@
 flowchart LR
-    Claim["corpus claim<br/>Force causes acceleration"]
-    Hypothesis["causal hypothesis<br/>unpromoted KnowledgeAtom"]
-    World["generated sandbox world"]
-    Experiment["Darwin acts in world"]
-    Transition["observed transition"]
-    Promoted["provenance promoted<br/>support_kind=generated_experiment"]
+    Plan["ResponsePlan<br/>mode, thesis, answer_points, causal_claims,<br/>uncertainty_levels, self_reflection"]
+    Outline["RhetoricalOutline<br/>mode-aware section list"]
+    Draft["Section drafters<br/>humanize plan fields via SurfaceRules"]
+    Weave["WeaveEngine<br/>transitions, length variety, asides"]
+    Budget["LengthBudgeter<br/>short / medium / long"]
+    Smooth["Smoother<br/>punctuation, capitalization"]
+    Validator["check_content_words<br/>FUNCTION_WORDS + STRUCTURE_CONNECTORS + plan aliases"]
+    Output["utterance"]
 
-    Claim --> Hypothesis --> World --> Experiment --> Transition --> Promoted
-    Claim -. "not a belief by itself" .-> Hypothesis
+    Plan --> Outline --> Draft --> Weave --> Budget --> Smooth --> Validator --> Output
+    Validator -. "fail -> tighter rerun or composer fallback" .-> Draft
