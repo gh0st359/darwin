@@ -296,6 +296,16 @@ def brain(
     if kernel in {"v4", "v5"}:
         runtime.kernel_scheduler = ActorScheduler(workers=workers, accelerator=accelerator)
         runtime.kernel_mode = kernel
+    # v5 swaps the runtime startup path so the kernel/driver replaces the
+    # five fixed-interval daemons. We monkey-patch the daemon's start hook
+    # to call ``start_v5`` instead of ``start``. (The daemon binds the
+    # socket FIRST, then calls runtime.start(); we intercept that call.)
+    if kernel == "v5":
+        original_start = runtime.start
+        def _start_v5_path() -> None:
+            runtime.start_v5()
+        runtime.start = _start_v5_path  # type: ignore[assignment]
+        runtime._v3_start = original_start  # keep handle for tests/debug
     # Wire up Darwin's self-awareness with the full runtime context.
     from darwin.self_awareness import (
         REALIZER_KIND_GEMMA,
@@ -326,7 +336,10 @@ def brain(
     print(f"kernel={kernel}")
     print(f"dlm={dlm.name}")
     print(f"listening on {host}:{port}")
-    print(f"background loops: {', '.join(runtime.loop_intervals)}")
+    if kernel == "v5":
+        print("scheduler=kernel-driven (one thread, priority queue, saturation-aware)")
+    else:
+        print(f"background loops: {', '.join(runtime.loop_intervals)}")
     print("Attach a client with: darwin connect")
     print("Press Ctrl-C to stop.")
     try:

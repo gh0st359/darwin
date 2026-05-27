@@ -514,6 +514,25 @@ class DarwinDaemon:
                 for item in scan.get("scan", [])[:10]
             ]
         if head == "/loops":
+            kernel_mode = getattr(runtime, "kernel_mode", "v3")
+            if kernel_mode == "v5":
+                scheduler = runtime.kernel_scheduler
+                if scheduler is None:
+                    return ["v5 kernel scheduler is not attached"]
+                out = ["kernel-driven loops (v5):"]
+                in_flight = scheduler.in_flight()
+                completions = scheduler.metrics.completions_by_kind
+                kinds = sorted(
+                    set(in_flight) | set(completions) | {"experiment", "simulation", "dream", "self_modification", "uncertainty", "consolidation"}
+                )
+                for kind in kinds:
+                    out.append(
+                        f"- {kind:<18} in_flight={in_flight.get(kind, 0)} "
+                        f"completed={completions.get(kind, 0)} "
+                        f"rate/min={scheduler.completion_rate(kind):.2f}"
+                    )
+                out.append(f"queue={scheduler.queue_size()}")
+                return out
             out = ["background loops:"]
             for name, interval in runtime.loop_intervals.items():
                 state = runtime._loop_state.get(name, {})

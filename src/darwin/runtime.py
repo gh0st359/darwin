@@ -16,6 +16,7 @@ from darwin.dlm import DLMRenderResult, DarwinLanguageModule, StubDLM
 from darwin.embodiment import ConversationAdapter, EnvironmentAdapter
 from darwin.experiments import ExperimentResult
 from darwin.instrumentation import BackgroundLogEntry, PlanLogEntry, StructuredLogger
+from darwin.kernel import ActorScheduler, KernelDriver
 from darwin.retrieval import ContextRetriever, RetrievalPacket
 from darwin.self_modification import ModificationOutcome, SelfModificationEngine
 from darwin.storage import PersistentStore
@@ -94,6 +95,13 @@ class DarwinRuntime:
         self._stop = threading.Event()
         self._threads: dict[str, threading.Thread] = {}
         self._loop_state: dict[str, dict[str, Any]] = {}
+        # Phase D wiring. ``kernel_scheduler`` and ``kernel_mode`` are set
+        # externally by the CLI when --kernel is v4 or v5. The driver below
+        # is only spun up by ``start_v5()`` so v3/v4 paths keep their fixed-
+        # interval loops unchanged.
+        self.kernel_scheduler: ActorScheduler | None = None
+        self.kernel_mode: str = "v3"
+        self._kernel_driver: KernelDriver | None = None
         self.state_path = Path(state_path) if state_path else None
         defaults = {
             "experiment": interval,
@@ -109,6 +117,8 @@ class DarwinRuntime:
 
     @property
     def running(self) -> bool:
+        if self._kernel_driver is not None and self._kernel_driver.running():
+            return True
         return any(thread.is_alive() for thread in self._threads.values())
 
     # -- lifecycle -------------------------------------------------------
@@ -140,8 +150,35 @@ class DarwinRuntime:
             loop="main",
         )
 
+    def start_v5(self) -> None:
+        """Boot the v5 kernel-driven cognition loop instead of fixed daemons.
+
+        v3/v4 use ``start()`` which spawns five fixed-interval daemon threads.
+        v5 spawns ONE thread (``KernelDriver``) that pulls priority-ordered
+        jobs from ``ActorScheduler``. The same ``_loop_*`` methods become
+        job handlers; nothing else in Darwin needs to change.
+        """
+
+        if self._kernel_driver is not None and self._kernel_driver.running():
+            return
+        if self.kernel_scheduler is None:
+            self.kernel_scheduler = ActorScheduler()
+        self.kernel_mode = "v5"
+        self._stop.clear()
+        self._kernel_driver = KernelDriver(self, self.kernel_scheduler)
+        self._kernel_driver.start()
+        self._event(
+            "runtime",
+            "Darwin's v5 kernel-driven cognition is running on one scheduler thread.",
+            payload={"kernel": "v5"},
+            loop="main",
+        )
+
     def stop(self) -> None:
         self._stop.set()
+        if self._kernel_driver is not None:
+            self._kernel_driver.stop()
+            self._kernel_driver = None
         for thread in list(self._threads.values()):
             thread.join(timeout=max(1.0, self.interval * 2.0))
         self._threads.clear()
@@ -366,6 +403,28 @@ class DarwinRuntime:
                 content,
                 payload={"scan": scan},
                 loop="uncertainty",
+            )
+
+    def _handle_consolidation(self) -> RuntimeEvent | None:
+        """v5 kernel job: light maintenance pass on consolidated memory.
+
+        Phase F will expand this to call ``memory.consolidate_redundant_
+        beliefs()`` and ``decay_stale_concepts()``. For now it's a
+        lightweight tick that re-emits the dream summary without forcing
+        another full dream cycle.
+        """
+
+        with self._lock:
+            consolidation = self.darwin.memory.concepts.consolidate()
+            content = (
+                f"Consolidation: {len(consolidation.get('clusters_formed', []))} "
+                f"clusters formed, {len(consolidation.get('concepts_decayed', []))} concepts decayed."
+            )
+            return self._event(
+                "consolidation",
+                content,
+                payload={"consolidation": consolidation},
+                loop="consolidation",
             )
 
     # -- on-demand cognition --------------------------------------------
