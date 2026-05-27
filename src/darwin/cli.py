@@ -165,16 +165,39 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def ingest_corpus(source: str, path: Path, memory_path: Path) -> int:
+    from darwin.generative import SandboxedWorldCompiler
+
     store = PersistentStore(memory_path)
     source_type = "wikipedia" if source == "wikidump" else source
     result = CorpusIngestor(store=store).ingest(path, source_type=source_type)
     graph = KnowledgeGraph.from_store(store)
     specs = WorldSpecGenerator().generate(graph)
+    compiler = SandboxedWorldCompiler()
+    accepted = 0
     for spec in specs:
-        store.record_world_spec(spec.to_record(), status="candidate")
+        validation = compiler.validate(spec)
+        store.record_validation_result(
+            target=f"world_spec:{spec.name}",
+            valid=validation.valid,
+            payload=validation.to_record(),
+        )
+        if validation.valid:
+            store.record_world_spec(spec.to_record(), status="candidate")
+            accepted += 1
+    store.record_research_event(
+        status="ingested",
+        url=str(path),
+        payload={
+            "source_type": source_type,
+            "atoms_created": result.atoms_created,
+            "atoms_seen": result.atoms_seen,
+            "specs_generated": len(specs),
+            "specs_accepted": accepted,
+        },
+    )
     print(
         f"ingested {result.atoms_created} knowledge atoms from {path} "
-        f"and generated {len(specs)} sandbox world specs"
+        f"and generated {accepted}/{len(specs)} sandbox world specs"
     )
     return 0
 

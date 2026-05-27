@@ -233,6 +233,29 @@ class DarwinRuntime:
                 result = self.darwin.experiment_engine.evaluate(proposal, transition)
                 if self.store is not None:
                     self.store.record_experiment(result.to_record())
+                    # Phase B wiring: if this experiment ran in a v5
+                    # generated world, also record it in the dedicated
+                    # generated_experiments table with its provenance.
+                    world_name = transition.metadata.get("world")
+                    if (
+                        isinstance(world_name, str)
+                        and world_name.startswith("generated/")
+                    ):
+                        provenance_ids = list(transition.metadata.get("provenance_ids", []))
+                        self.store.record_generated_experiment(
+                            world_name=world_name,
+                            action=proposal.action.name,
+                            provenance_ids=provenance_ids,
+                            payload={
+                                "question": proposal.question,
+                                "confirmed": result.confirmed,
+                                "uncertainty": proposal.uncertainty,
+                                "expected_reward": proposal.expected_reward,
+                                "reward": float(transition.reward),
+                                "after_state": dict(transition.after),
+                                "surprises": list(result.surprises),
+                            },
+                        )
                 return self._experiment_event(result, loop="experiment")
 
             reflection = self.darwin.reflect()

@@ -276,3 +276,37 @@ class KnowledgeGraph:
 
     def promoted_atoms(self) -> list[KnowledgeAtom]:
         return [atom for atom in self.atoms if atom.promoted]
+
+    def relations_for(self, subject: str) -> list[KnowledgeAtom]:
+        """Return ``relation`` atoms (Wikidata-style triples) about a subject."""
+
+        normalized = subject.lower().strip()
+        if not normalized:
+            return []
+        return [
+            atom
+            for atom in self.atoms
+            if atom.kind == "relation" and atom.subject.lower() == normalized
+        ]
+
+    def quantities_for(self, subject: str) -> list[KnowledgeAtom]:
+        """Return ``quantity`` atoms (definitions describing measurable units)."""
+
+        normalized = subject.lower().strip()
+        if not normalized:
+            return []
+        return [
+            atom
+            for atom in self.atoms
+            if atom.kind == "quantity" and atom.subject.lower() == normalized
+        ]
+
+    def definitions_for(self, subject: str) -> list[KnowledgeAtom]:
+        normalized = subject.lower().strip()
+        if not normalized:
+            return []
+        return [
+            atom
+            for atom in self.atoms
+            if atom.kind == "definition" and atom.subject.lower() == normalized
+        ]

@@ -397,6 +397,117 @@ class PersistentStore:
             for row in rows
         ]
 
+    # -- v5 scaffolded tables (Phase B wiring) ----------------------------
+
+    def record_generated_experiment(
+        self,
+        world_name: str,
+        action: str,
+        provenance_ids: list[str],
+        payload: Mapping[str, Any],
+    ) -> int:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                insert into generated_experiments(world_name, action, provenance_ids, payload, created_at)
+                values (?, ?, ?, ?, current_timestamp)
+                """,
+                (
+                    world_name,
+                    action,
+                    dumps(list(provenance_ids or [])),
+                    dumps(dict(payload)),
+                ),
+            )
+            connection.commit()
+            return int(cursor.lastrowid)
+
+    def record_validation_result(
+        self,
+        target: str,
+        valid: bool,
+        payload: Mapping[str, Any],
+    ) -> int:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                insert into validation_results(target, valid, payload, created_at)
+                values (?, ?, ?, current_timestamp)
+                """,
+                (target, 1 if valid else 0, dumps(dict(payload))),
+            )
+            connection.commit()
+            return int(cursor.lastrowid)
+
+    def record_research_event(
+        self,
+        status: str,
+        url: str,
+        payload: Mapping[str, Any],
+    ) -> int:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                insert into research_events(status, url, payload, created_at)
+                values (?, ?, ?, current_timestamp)
+                """,
+                (status, url, dumps(dict(payload))),
+            )
+            connection.commit()
+            return int(cursor.lastrowid)
+
+    def list_generated_experiments(self, limit: int = 50) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "select world_name, action, provenance_ids, payload, created_at "
+                "from generated_experiments order by id desc limit ?",
+                (limit,),
+            ).fetchall()
+        return [
+            {
+                "world_name": row["world_name"],
+                "action": row["action"],
+                "provenance_ids": loads(row["provenance_ids"]),
+                "payload": loads(row["payload"]),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def list_validation_results(self, limit: int = 50) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "select target, valid, payload, created_at "
+                "from validation_results order by id desc limit ?",
+                (limit,),
+            ).fetchall()
+        return [
+            {
+                "target": row["target"],
+                "valid": bool(row["valid"]),
+                "payload": loads(row["payload"]),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def list_research_events(self, limit: int = 50) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "select status, url, payload, created_at "
+                "from research_events order by id desc limit ?",
+                (limit,),
+            ).fetchall()
+        return [
+            {
+                "status": row["status"],
+                "url": row["url"],
+                "payload": loads(row["payload"]),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
     def counts(self) -> dict[str, int]:
         tables = [
             "transitions",
