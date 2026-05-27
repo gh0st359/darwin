@@ -420,11 +420,15 @@ class DarwinDaemon:
         if head == "/mind":
             lines = list(runtime.darwin.self_report().lines())
             scheduler = getattr(runtime, "kernel_scheduler", None)
+            kernel_mode = getattr(runtime, "kernel_mode", "v3")
             if scheduler is not None:
-                lines.append(f"kernel=v4 workers={scheduler.workers} accelerator={scheduler.accelerator}")
+                lines.append(
+                    f"kernel={kernel_mode} workers={scheduler.workers} "
+                    f"accelerator={scheduler.accelerator}"
+                )
                 lines.append(f"kernel_metrics={scheduler.metrics.to_record()}")
             else:
-                lines.append("kernel=v3")
+                lines.append(f"kernel={kernel_mode}")
             return lines
         if head == "/research":
             try:
@@ -574,6 +578,57 @@ class DarwinDaemon:
             return out
         if head == "/trace":
             return [f"- {e.kind}: {e.content}" for e in runtime.recent_events(limit=12)]
+        if head == "/identity":
+            introspector = getattr(runtime.darwin, "introspector", None)
+            if introspector is None:
+                return ["no introspector attached"]
+            return introspector.identity().lines()
+        if head == "/architecture":
+            introspector = getattr(runtime.darwin, "introspector", None)
+            if introspector is None:
+                return ["no introspector attached"]
+            identity = introspector.identity()
+            out = [
+                f"name={identity.name} version={identity.version}",
+                f"kernel={identity.kernel_mode} realizer={identity.realizer_kind}",
+                f"modules ({len(identity.modules)}):",
+            ]
+            for module in identity.modules:
+                state = ", ".join(f"{k}={v}" for k, v in module.current().items())
+                out.append(f"- {module.name} | role={module.role} | {state}")
+                out.append(f"    class={module.class_path}")
+                out.append(f"    methods={', '.join(module.public_methods)}")
+            capabilities = introspector.capabilities()
+            out.append(
+                f"capabilities: total_beliefs={capabilities['total_beliefs']} "
+                f"confident={capabilities['confident_beliefs']} "
+                f"actions={capabilities['action_count']}"
+            )
+            out.append(f"current_focus={introspector.current_focus()}")
+            return out
+        if head == "/history":
+            limit = 20
+            if len(parts) > 1:
+                try:
+                    limit = max(1, int(parts[1]))
+                except ValueError:
+                    pass
+            introspector = getattr(runtime.darwin, "introspector", None)
+            if introspector is None:
+                return ["no introspector attached"]
+            history = introspector.history(limit=limit)
+            if not history:
+                return ["no self-modification history yet."]
+            out = []
+            for entry in history:
+                # Records may come from either the v5 ledger or the legacy
+                # self_modifications table. Render best-effort.
+                kind = entry.get("kind", entry.get("proposal", {}).get("kind", "?"))
+                status = entry.get("status", "accepted" if entry.get("accepted") else "rejected")
+                gain = entry.get("improvement") or entry.get("gain") or 0.0
+                rationale = entry.get("rationale") or entry.get("proposal", {}).get("rationale", "")
+                out.append(f"- [{status}] {kind} gain={gain:.4f} {rationale}")
+            return out
         return [f"unknown command: {head}"]
 
 

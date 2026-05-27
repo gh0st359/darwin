@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
     brain_parser.add_argument("--interval", type=float, default=3.0)
     brain_parser.add_argument("--host", default=DEFAULT_HOST)
     brain_parser.add_argument("--port", type=int, default=DEFAULT_PORT)
-    brain_parser.add_argument("--kernel", choices=["v3", "v4"], default="v3")
+    brain_parser.add_argument("--kernel", choices=["v3", "v4", "v5"], default="v3")
     brain_parser.add_argument("--workers", default="auto")
     brain_parser.add_argument("--accelerator", default="auto")
     brain_parser.add_argument(
@@ -205,20 +205,40 @@ def brain(
     """Run Darwin as a 24/7 daemon. No stdin loop; clients attach over TCP."""
 
     store = PersistentStore(memory_path)
-    if kernel == "v4":
+    if kernel in {"v4", "v5"}:
         adapter = _build_v4_adapter(store)
     else:
         universe = UniverseSimulation(seed=seed)
         adapter = UniverseSimulationAdapter(universe)
     actions = ensure_chat_action(adapter.possible_actions())
-    goal = Goal(
-        desired={"room.room_bright": True, "room.fuse_intact": True, "space.a.y": 0},
-        weights={"room.room_bright": 1.2, "room.fuse_intact": 1.0, "space.a.y": 0.4},
-        exploration_weight=0.35,
-    )
+    if kernel == "v5":
+        # v5 does not target a hand-coded v3 room/space goal. The goal
+        # surface is open: exploration is the goal until the kernel's
+        # curriculum scheduler (Phase D) selects a specific learning
+        # priority. We pass an empty desired set so nothing leaks into
+        # /experiments rationale.
+        goal = Goal(
+            desired={},
+            weights={},
+            exploration_weight=0.5,
+        )
+    else:
+        goal = Goal(
+            desired={"room.room_bright": True, "room.fuse_intact": True, "space.a.y": 0},
+            weights={"room.room_bright": 1.2, "room.fuse_intact": 1.0, "space.a.y": 0.4},
+            exploration_weight=0.35,
+        )
     darwin = Darwin.from_store(
         actions=actions, store=store, seed=seed, exploration_rate=exploration,
     )
+    if kernel == "v5" and dlm_choice == "gemma":
+        print(
+            "error: --dlm gemma is not supported on --kernel v5.\n"
+            "v5 ships a symbolic DiscourseRealizer that owns Darwin's language\n"
+            "without any LLM in the inference path. Re-run with --dlm stub or\n"
+            "drop --dlm entirely; the realizer is selected automatically."
+        )
+        return 2
     if dlm_choice == "gemma":
         if not gemma_dlm_available():
             print("warning: gemma backend requested but no local model detected; DLM will fall back when unreachable.")
@@ -248,9 +268,31 @@ def brain(
         dlm=dlm,
         training_collector=TrainingDataCollector(),
     )
-    if kernel == "v4":
+    if kernel in {"v4", "v5"}:
         runtime.kernel_scheduler = ActorScheduler(workers=workers, accelerator=accelerator)
-        runtime.kernel_mode = "v4"
+        runtime.kernel_mode = kernel
+    # Wire up Darwin's self-awareness with the full runtime context.
+    from darwin.self_awareness import (
+        REALIZER_KIND_GEMMA,
+        REALIZER_KIND_STUB,
+        REALIZER_KIND_SYMBOLIC,
+        SelfIntrospector,
+    )
+    if kernel == "v5":
+        realizer_kind = REALIZER_KIND_SYMBOLIC
+    elif dlm_choice == "gemma":
+        realizer_kind = REALIZER_KIND_GEMMA
+    else:
+        realizer_kind = REALIZER_KIND_STUB
+    darwin.introspector = SelfIntrospector(
+        darwin,
+        runtime=runtime,
+        store=store,
+        kernel_mode=kernel,
+        realizer_kind=realizer_kind,
+        realizer_name=dlm.name,
+        memory_path=memory_path,
+    )
     daemon = DarwinDaemon(runtime, host=host, port=port)
 
     print("Project Darwin brain")
@@ -418,6 +460,9 @@ def _print_remote_help() -> None:
                 "/knowledge Q   query the v4 knowledge graph",
                 "/hypotheses    show corpus and causal hypotheses",
                 "/mind          show kernel/introspection state",
+                "/identity      show Darwin's structural self-image (v5+)",
+                "/architecture  show all modules, their roles, and current state",
+                "/history N     show last N self-modifications (newest first)",
                 "/research status show dormant live research status",
                 "/why ID        explain belief or knowledge provenance",
                 "/concepts      show concept hierarchy",

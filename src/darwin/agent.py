@@ -8,6 +8,7 @@ from darwin.causal import CausalModel
 from darwin.experiments import ExperimentEngine, ExperimentProposal
 from darwin.memory import Memory
 from darwin.planner import CausalPlanner, MultiStepPlan, PlanCandidate
+from darwin.self_awareness import SelfIntrospector
 from darwin.self_model import SelfModel, SelfReport
 from darwin.semantics import SemanticFrame, SemanticMemory, SemanticParser
 from darwin.storage import PersistentStore
@@ -51,6 +52,11 @@ class Darwin:
         self._rng = random.Random(self.seed)
         self._time = 0
         self._planner_overrides: dict[str, float] = {}
+        # Self-awareness substrate. Runtime/CLI calls attach_runtime later
+        # with full context (kernel_mode, realizer, memory path) once those
+        # are known; this default makes the introspector usable even in
+        # tests that construct Darwin directly.
+        self.introspector = SelfIntrospector(self, store=self.store)
 
     @classmethod
     def from_store(
