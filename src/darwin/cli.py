@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 
 from darwin.agent import Darwin
-from darwin.dlm import GemmaDLM, StubDLM, gemma_dlm_available
+from darwin.dlm import GemmaDLM, StubDLM, SymbolicRealizerDLM, gemma_dlm_available
 from darwin.embodiment import RoomSimulationAdapter, UniverseSimulationAdapter
 from darwin.generative import ActionSpec, GenerativeUniverse, GenerativeUniverseAdapter, RuleSpec, WorldSpec, WorldSpecGenerator
 from darwin.instrumentation import StructuredLogger
@@ -262,7 +262,9 @@ def brain(
             "drop --dlm entirely; the realizer is selected automatically."
         )
         return 2
-    if dlm_choice == "gemma":
+    if kernel == "v5":
+        dlm = SymbolicRealizerDLM()
+    elif dlm_choice == "gemma":
         if not gemma_dlm_available():
             print("warning: gemma backend requested but no local model detected; DLM will fall back when unreachable.")
         dlm = GemmaDLM(backend=dlm_backend, model=dlm_model)
