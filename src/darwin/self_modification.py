@@ -151,12 +151,21 @@ class SelfModificationEngine:
 
         snapshot = self._snapshot()
         pre_mind_snapshot_id = self._capture_mind_snapshot()
+        # v8 continuity scoring: snapshot the substrate's persistence surface
+        # before applying so the gate can see what the candidate grew.
+        before_continuity = self._continuity_snapshot()
         try:
             self._apply_with_containment(proposal)
             candidate_error = _prediction_error(self.darwin, sample)
             improvement = baseline_error - candidate_error
+            after_continuity = self._continuity_snapshot()
             accepted = self._gate_decision(
-                proposal, improvement, baseline_error, candidate_error
+                proposal,
+                improvement,
+                baseline_error,
+                candidate_error,
+                before_continuity=before_continuity,
+                after_continuity=after_continuity,
             )
             notes = "accepted in self-test" if accepted else "rejected: gate"
             if not accepted:
@@ -225,20 +234,44 @@ class SelfModificationEngine:
         improvement: float,
         baseline_error: float,
         candidate_error: float,
+        *,
+        before_continuity: Any = None,
+        after_continuity: Any = None,
     ) -> bool:
         if self.meta_gate is None:
             return improvement > 0.0 and candidate_error <= baseline_error
+        from darwin.mysterio.continuity import continuity_term, visibility_term
         from darwin.mysterio.meta_gate import GateInputs
+
+        c_term = 0.0
+        v_term = 0.0
+        if before_continuity is not None and after_continuity is not None:
+            try:
+                c_term = continuity_term(before_continuity, after_continuity)
+                v_term = visibility_term(before_continuity, after_continuity)
+            except Exception:
+                c_term = 0.0
+                v_term = 0.0
 
         inputs = GateInputs(
             improvement=improvement,
             baseline_error=baseline_error,
             candidate_error=candidate_error,
-            continuity_term=0.0,
-            visibility_term=0.0,
+            continuity_term=c_term,
+            visibility_term=v_term,
         )
         decision = self.meta_gate.decide(inputs)
         return decision.accepted
+
+    def _continuity_snapshot(self) -> Any:
+        if self.runtime is None:
+            return None
+        try:
+            from darwin.mysterio.continuity import ContinuitySnapshot
+
+            return ContinuitySnapshot.from_runtime(self.runtime)
+        except Exception:
+            return None
 
     def _capture_mind_snapshot(self) -> str | None:
         if self.snapshot_store is None:

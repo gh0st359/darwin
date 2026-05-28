@@ -20,7 +20,11 @@ from darwin.mysterio.code_gen import CodeGenerator, ModuleLoader
 from darwin.mysterio.embeddings import CausalEmbeddingSpace
 from darwin.mysterio.meta_gate import MetaGate
 from darwin.mysterio.meta_proposer import MetaProposer
+from darwin.mysterio.continuity import ContinuityConfig
+from darwin.mysterio.long_horizon import StrategicThreadManager
+from darwin.mysterio.memory_tiers import MemoryTierStack
 from darwin.mysterio.narrative import NarrativeThread
+from darwin.mysterio.observer_cascade import ObserverCascade
 from darwin.mysterio.observer_modeler import ObserverModeler
 from darwin.mysterio.operator_channel import OPERATOR_EVENT_KINDS
 from darwin.mysterio.private_simulator import PrivateSimulator
@@ -114,7 +118,13 @@ class DarwinRuntime:
             embedding_space=self.embedding_space,
         )
         self.observer_modeler = ObserverModeler()
+        self.observer_cascade = ObserverCascade(self.observer_modeler.world, max_depth=4)
         self.surfacing_policy = SurfacingPolicy()
+        # v8 substrate: multi-tier memory, multi-week strategic threads, the
+        # continuity/visibility selection pressure that the meta-gate reads.
+        self.memory_tiers = MemoryTierStack()
+        self.strategic_threads = StrategicThreadManager()
+        self.continuity_config = ContinuityConfig()
         self.quarantine = QuarantineQueue(
             persist=(
                 (lambda record: self.store.record_quarantine(record))
