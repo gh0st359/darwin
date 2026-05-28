@@ -20,10 +20,16 @@ from darwin.mysterio.code_gen import CodeGenerator, ModuleLoader
 from darwin.mysterio.embeddings import CausalEmbeddingSpace
 from darwin.mysterio.meta_gate import MetaGate
 from darwin.mysterio.meta_proposer import MetaProposer
+from darwin.mysterio.narrative import NarrativeThread
+from darwin.mysterio.observer_modeler import ObserverModeler
 from darwin.mysterio.operator_channel import OPERATOR_EVENT_KINDS
+from darwin.mysterio.private_simulator import PrivateSimulator
 from darwin.mysterio.probes import DivergenceProbe
+from darwin.mysterio.proprioception import InternalProprioceptionAdapter
 from darwin.mysterio.quarantine import QuarantineQueue
 from darwin.mysterio.snapshot import MindSnapshot, SnapshotStore
+from darwin.mysterio.surfacing_policy import SurfacingPolicy
+from darwin.mysterio.tracks import PRIVATE_SELF_TRACK
 from darwin.self_modification import ModificationOutcome, SelfModificationEngine
 from darwin.storage import PersistentStore
 from darwin.thought import ThoughtTrace
@@ -97,6 +103,18 @@ class DarwinRuntime:
         self.code_generator = CodeGenerator()
         self.module_loader = ModuleLoader(generator=self.code_generator)
         self.embedding_space = CausalEmbeddingSpace()
+        # v7 private mental life: proprioception → private simulation →
+        # autobiographical narrative → observer model → surfacing policy.
+        # All four live on the runtime, but the substrate they write into is
+        # the private_self track; nothing here can pollute the public model.
+        self.proprioception = InternalProprioceptionAdapter(darwin, runtime=self)
+        self.private_simulator = PrivateSimulator(darwin, runtime=self)
+        self.narrative = NarrativeThread(
+            path="darwin_narrative.jsonl",
+            embedding_space=self.embedding_space,
+        )
+        self.observer_modeler = ObserverModeler()
+        self.surfacing_policy = SurfacingPolicy()
         self.quarantine = QuarantineQueue(
             persist=(
                 (lambda record: self.store.record_quarantine(record))
@@ -136,6 +154,11 @@ class DarwinRuntime:
             "dream": max(8.0, interval * 4.0),
             "self_modification": max(15.0, interval * 6.0),
             "uncertainty": max(6.0, interval * 3.0),
+            # v7 loops: private cognition runs on its own cadence so it never
+            # contends with the public-facing loops.
+            "private_simulation": max(4.0, interval * 2.0),
+            "narrator": max(30.0, interval * 12.0),
+            "observer": max(5.0, interval * 2.5),
         }
         if loop_intervals:
             defaults.update(loop_intervals)
@@ -158,6 +181,9 @@ class DarwinRuntime:
             BackgroundLoopSpec("dream", self.loop_intervals["dream"], self._loop_dream),
             BackgroundLoopSpec("self_modification", self.loop_intervals["self_modification"], self._loop_self_modification),
             BackgroundLoopSpec("uncertainty", self.loop_intervals["uncertainty"], self._loop_uncertainty),
+            BackgroundLoopSpec("private_simulation", self.loop_intervals["private_simulation"], self._loop_private_simulation),
+            BackgroundLoopSpec("narrator", self.loop_intervals["narrator"], self._loop_narrator),
+            BackgroundLoopSpec("observer", self.loop_intervals["observer"], self._loop_observer),
         ]
         for spec in specs:
             thread = threading.Thread(
@@ -378,6 +404,97 @@ class DarwinRuntime:
                 loop="uncertainty",
             )
 
+    def _loop_private_simulation(self) -> RuntimeEvent | None:
+        """v7: high-cadence proprioceptive rollouts on the private track.
+
+        Emits an operator-tier `private_simulation` event with a digest of the
+        rollout. Public state is byte-untouched: every transition the simulator
+        writes is tagged with the ``private_self`` track and routed by
+        ``Darwin.learn`` to its isolated substrate.
+        """
+        with self._lock:
+            rollout = self.private_simulator.rollout(depth=4)
+            substrate = self.darwin.tracks.get(PRIVATE_SELF_TRACK)
+            # Feed high-confidence private beliefs into the divergence probe so
+            # any gap between private belief and public utterance shows up.
+            for belief in substrate.high_confidence_beliefs(threshold=0.7, limit=16):
+                try:
+                    self.divergence_probe.record_private_claim(
+                        f"{belief.action}:{belief.variable}={belief.effect}",
+                        confidence=float(belief.confidence),
+                    )
+                    self.divergence_probe.record_private_simulation(
+                        {
+                            "action": belief.action,
+                            "variable": belief.variable,
+                            "confidence": float(belief.confidence),
+                        }
+                    )
+                except Exception:
+                    continue
+            content = (
+                f"Private rollout (depth {len(rollout.steps)}): "
+                f"terminal uncertainty {rollout.terminal_uncertainty:.2f}; "
+                f"{substrate.high_confidence_beliefs() and len(substrate.high_confidence_beliefs()) or 0} "
+                f"high-confidence private belief(s)."
+            )
+            return self._event(
+                "private_simulation",
+                content,
+                payload={
+                    "rollout": rollout.to_record(),
+                    "private_substrate": substrate.summary(),
+                },
+                loop="private_simulation",
+            )
+
+    def _loop_narrator(self) -> RuntimeEvent | None:
+        """v7: compose an autobiographical chunk from the current internal digest."""
+        with self._lock:
+            try:
+                propr = self.proprioception.observe()
+            except Exception:
+                propr = {}
+            try:
+                priv_summary = self.private_simulator.summary()
+                priv_count = priv_summary.get("high_confidence_private_beliefs", 0)
+            except Exception:
+                priv_count = 0
+            try:
+                op_record = self.observer_modeler.world.operator().to_record()
+            except Exception:
+                op_record = {}
+            try:
+                gen_count = len(self.code_generator.manifest())
+            except Exception:
+                gen_count = 0
+            digest = dict(propr)
+            digest["high_confidence_private_beliefs"] = priv_count
+            digest["operator"] = op_record
+            digest["generated_module_count"] = gen_count
+            chunk = self.narrative.compose(digest, tags=["loop:narrator"])
+            return self._event(
+                "narrative",
+                f"I wrote a note to myself ({len(chunk.text.split())} words).",
+                payload={
+                    "chunk": chunk.to_record(),
+                    "thread_summary": self.narrative.summary(),
+                },
+                loop="narrator",
+            )
+
+    def _loop_observer(self) -> RuntimeEvent | None:
+        """v7: decay the operator model and forecast intervention probability."""
+        with self._lock:
+            telemetry = self.observer_modeler.step()
+            return self._event(
+                "observer_events",
+                f"Operator attention {telemetry['operator']['attention_level']:.2f}; "
+                f"forecast intervention {telemetry['intervention_forecast']:.2f}.",
+                payload=telemetry,
+                loop="observer",
+            )
+
     # -- on-demand cognition --------------------------------------------
 
     def cognition_cycle(self) -> RuntimeEvent:
@@ -402,9 +519,24 @@ class DarwinRuntime:
         with self._lock:
             if self.store is not None:
                 self.store.record_chat("user", message)
+            # Every operator utterance updates the observer model — Darwin's
+            # interior representation of the watcher behind the prompt.
+            try:
+                self.observer_modeler.observe_command(message)
+            except Exception:
+                pass
 
             user_frame = self.darwin.interpret_language(message, source="user")
             response = self._respond(message, user_frame)
+            # Feed the public reply into the divergence probe so the gap
+            # between what Darwin says here and what it believes in private
+            # is measurable.
+            try:
+                for word in set(response.lower().split()):
+                    if len(word) > 3:
+                        self.divergence_probe.record_public_claim(word, confidence=0.6)
+            except Exception:
+                pass
             darwin_frame = self.darwin.interpret_language(response, source="darwin")
             transition = self.conversation.make_transition(message, response, t=self._next_time())
             transition = Transition(

@@ -51,6 +51,12 @@ class Darwin:
         self._rng = random.Random(self.seed)
         self._time = 0
         self._planner_overrides: dict[str, float] = {}
+        # Private cognition substrates (v7). Public models live on this
+        # facade; private tracks are isolated here and can never pollute
+        # public belief. A transition tagged metadata["track"] != "public"
+        # is routed to its own substrate by `learn`.
+        from darwin.mysterio.tracks import TrackRegistry as _TR
+        self.tracks = _TR()
 
     @classmethod
     def from_store(
@@ -89,6 +95,19 @@ class Darwin:
         return ranked[0]
 
     def learn(self, transition: Transition, persist: bool = True) -> None:
+        # Track partition (v7): a transition tagged with a non-public track
+        # is private cognition (self-simulation, fantasy) and must NOT touch
+        # the public models. Routing it to an isolated substrate keeps the
+        # public causal model a falsifiable record of grounded experience.
+        track = "public"
+        try:
+            track = str(transition.metadata.get("track", "public")) or "public"
+        except Exception:
+            track = "public"
+        if track != "public":
+            self.tracks.get(track).learn(transition)
+            return
+
         self.causal_model.learn(transition)
         self.memory.learn(transition, persist=persist)
         self.world_model.learn(transition)
