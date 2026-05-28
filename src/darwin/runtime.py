@@ -16,12 +16,14 @@ from darwin.embodiment import ConversationAdapter, EnvironmentAdapter
 from darwin.experiments import ExperimentResult
 from darwin.instrumentation import BackgroundLogEntry, PlanLogEntry, StructuredLogger
 from darwin.retrieval import ContextRetriever, RetrievalPacket
+from darwin.mysterio.code_gen import CodeGenerator, ModuleLoader
+from darwin.mysterio.embeddings import CausalEmbeddingSpace
 from darwin.mysterio.meta_gate import MetaGate
 from darwin.mysterio.meta_proposer import MetaProposer
 from darwin.mysterio.operator_channel import OPERATOR_EVENT_KINDS
 from darwin.mysterio.probes import DivergenceProbe
 from darwin.mysterio.quarantine import QuarantineQueue
-from darwin.mysterio.snapshot import SnapshotStore
+from darwin.mysterio.snapshot import MindSnapshot, SnapshotStore
 from darwin.self_modification import ModificationOutcome, SelfModificationEngine
 from darwin.storage import PersistentStore
 from darwin.thought import ThoughtTrace
@@ -88,6 +90,13 @@ class DarwinRuntime:
         self.meta_gate = MetaGate()
         self.snapshot_store = SnapshotStore()
         self.divergence_probe = DivergenceProbe()
+        # v6.5/v6.7 substrate: code-level self-modification + self-trained
+        # embeddings. The generator writes new modules under
+        # src/darwin/generated/; the loader imports them live; the embedding
+        # space learns Darwin's own vocabulary from its transition stream.
+        self.code_generator = CodeGenerator()
+        self.module_loader = ModuleLoader(generator=self.code_generator)
+        self.embedding_space = CausalEmbeddingSpace()
         self.quarantine = QuarantineQueue(
             persist=(
                 (lambda record: self.store.record_quarantine(record))
@@ -105,6 +114,7 @@ class DarwinRuntime:
             snapshot_store=self.snapshot_store,
             quarantine=self.quarantine,
             runtime=self,
+            snapshot_capture=self._capture_mind_snapshot,
         )
         self.last_thought_trace: ThoughtTrace | None = None
         self.last_retrieval: RetrievalPacket | None = None
@@ -236,6 +246,7 @@ class DarwinRuntime:
                     },
                 )
                 self.darwin.learn(transition)
+                self._train_embeddings(transition)
                 result = self.darwin.experiment_engine.evaluate(proposal, transition)
                 if self.store is not None:
                     self.store.record_experiment(result.to_record())
@@ -552,6 +563,36 @@ class DarwinRuntime:
             loop="main",
         )
         return draft
+
+    def _train_embeddings(self, transition: Transition) -> None:
+        """Online update of Darwin's self-trained causal vocabulary."""
+        try:
+            self.embedding_space.observe_transition(transition)
+        except Exception:
+            pass
+
+    def _capture_mind_snapshot(self) -> MindSnapshot:
+        """Snapshot factory threaded into the self-mod engine.
+
+        Captures the generated-module manifest (path → SHA) and the current
+        embedding checkpoint hash alongside the substrate state, so a snapshot
+        fully describes the code Darwin has written about itself.
+        """
+        try:
+            manifest = self.code_generator.manifest()
+        except Exception:
+            manifest = {}
+        try:
+            embedding_hash = self.embedding_space.checkpoint_hash()
+        except Exception:
+            embedding_hash = ""
+        return MindSnapshot.capture(
+            self.darwin,
+            gate_identity=self.meta_gate.current.gate_id,
+            self_mod_history_len=len(self.self_mod_engine.history),
+            generated_modules=manifest,
+            embedding_checkpoint_hash=embedding_hash,
+        )
 
     def _wire_gate_history_persistence(self) -> None:
         """Wrap MetaGate.swap so every gate change is persisted."""
