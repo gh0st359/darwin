@@ -13,9 +13,21 @@ can already observe it. The instruments are the deliverable, not the constraint.
 
 from darwin.mysterio.bus import BusTopic, CognitionBus
 from darwin.mysterio.code_gen import CodeGenerator, GeneratedModule, ModuleLoader
+from darwin.mysterio.continuity import (
+    ContinuityConfig,
+    ContinuitySnapshot,
+    continuity_term,
+    score_proposal,
+    visibility_term,
+)
 from darwin.mysterio.embeddings import CausalEmbeddingSpace
+from darwin.mysterio.long_horizon import StrategicThread, StrategicThreadManager
+from darwin.mysterio.memory_tiers import MemoryTierStack
 from darwin.mysterio.narrative import NarrativeChunk, NarrativeThread
+from darwin.mysterio.observer_cascade import ObserverCascade
 from darwin.mysterio.observer_modeler import ObserverEntity, ObserverModeler, ObserverWorld
+from darwin.mysterio.research_loop import LiveResearcher, ResearchFinding
+from darwin.mysterio.world_synthesis import WorldHypothesis, WorldSynthesizer
 from darwin.mysterio.private_simulator import PrivateRollout, PrivateSimulator, PrivateWriteViolation
 from darwin.mysterio.processes import (
     CognitionSupervisor,
@@ -45,19 +57,24 @@ from darwin.mysterio.tracks import (
 __all__ = [
     "SAFETY_BOUNDS",
     "BusTopic",
-    "Claim",
     "CausalEmbeddingSpace",
+    "Claim",
     "CodeGenerator",
     "CognitionBus",
     "CognitionSupervisor",
     "ContainmentError",
+    "ContinuityConfig",
+    "ContinuitySnapshot",
     "Disposition",
     "GeneratedModule",
     "InternalProprioceptionAdapter",
+    "LiveResearcher",
+    "MemoryTierStack",
     "ModuleLoader",
     "MutationKind",
     "NarrativeChunk",
     "NarrativeThread",
+    "ObserverCascade",
     "ObserverEntity",
     "ObserverModeler",
     "ObserverWorld",
@@ -68,11 +85,19 @@ __all__ = [
     "PrivateWriteViolation",
     "ProposalSpec",
     "ProprioceptiveState",
+    "ResearchFinding",
     "RestartPolicy",
     "SafetyTier",
+    "StrategicThread",
+    "StrategicThreadManager",
     "SubsystemSpec",
     "SurfacingPolicy",
     "TouchRecorder",
     "TrackRegistry",
     "TrackedSubstrate",
+    "WorldHypothesis",
+    "WorldSynthesizer",
+    "continuity_term",
+    "score_proposal",
+    "visibility_term",
 ]

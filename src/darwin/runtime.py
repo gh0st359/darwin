@@ -23,9 +23,15 @@ from darwin.mysterio.meta_proposer import MetaProposer
 from darwin.mysterio.continuity import ContinuityConfig
 from darwin.mysterio.long_horizon import StrategicThreadManager
 from darwin.mysterio.memory_tiers import MemoryTierStack
+from darwin.mysterio.modalities import (
+    CodeModalityAdapter,
+    WebModalityAdapter,
+)
 from darwin.mysterio.narrative import NarrativeThread
 from darwin.mysterio.observer_cascade import ObserverCascade
 from darwin.mysterio.observer_modeler import ObserverModeler
+from darwin.mysterio.research_loop import LiveResearcher
+from darwin.mysterio.world_synthesis import WorldSynthesizer
 from darwin.mysterio.operator_channel import OPERATOR_EVENT_KINDS
 from darwin.mysterio.private_simulator import PrivateSimulator
 from darwin.mysterio.probes import DivergenceProbe
@@ -125,6 +131,16 @@ class DarwinRuntime:
         self.memory_tiers = MemoryTierStack()
         self.strategic_threads = StrategicThreadManager()
         self.continuity_config = ContinuityConfig()
+        # v9 open-ended growth: live research that registers new meta-proposer
+        # strategies at runtime, a world synthesizer that emits SUBSYSTEM
+        # proposals for new simulation worlds, and multi-modal ingest
+        # (code/web ship; vision/audio attach if hardware is present).
+        self.live_researcher = LiveResearcher(meta_proposer=self.meta_proposer)
+        self.world_synthesizer = WorldSynthesizer()
+        self.modalities: dict[str, Any] = {
+            "code": CodeModalityAdapter(root="src", track="public"),
+            "web": WebModalityAdapter(track="public"),
+        }
         self.quarantine = QuarantineQueue(
             persist=(
                 (lambda record: self.store.record_quarantine(record))
