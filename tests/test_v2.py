@@ -183,8 +183,10 @@ class Phase1SelfModificationTests(unittest.TestCase):
         proposals = engine.propose()
         self.assertGreater(len(proposals), 0)
         outcomes = engine.run_cycle()
-        # The engine should evaluate up to 3 proposals
-        self.assertLessEqual(len(outcomes), 3)
+        # Mysterio raises the per-cycle cap to 16 to allow compounding; only the
+        # legacy hand-authored kinds run when the engine has no meta_proposer wired.
+        self.assertLessEqual(len(outcomes), 16)
+        self.assertGreater(len(outcomes), 0)
         for outcome in outcomes:
             self.assertIsNotNone(outcome.proposal.proposal_id)
             self.assertIn(outcome.proposal.kind.split(".", 1)[0], {"causal", "exploration", "concept", "planner"})

@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from darwin.mysterio.operator_channel import OPERATOR_EVENT_KINDS, OperatorAuth
+from darwin.mysterio.snapshot import diff as snapshot_diff
 from darwin.runtime import DarwinRuntime, RuntimeEvent
 
 
@@ -61,6 +63,7 @@ class Subscriber:
     alive: threading.Event = field(default_factory=threading.Event)
     address: str = ""
     wants_events: bool = False
+    wants_operator: bool = False
 
     def send(self, payload: dict[str, Any]) -> None:
         if not self.alive.is_set():
@@ -175,9 +178,13 @@ class DarwinDaemon:
             "payload": event.payload,
             "timestamp": event.timestamp,
         }
+        is_operator_kind = event.kind in OPERATOR_EVENT_KINDS
         with self._subscribers_lock:
             for subscriber in list(self._subscribers):
-                if subscriber.wants_events:
+                if is_operator_kind:
+                    if subscriber.wants_operator:
+                        subscriber.send(payload)
+                elif subscriber.wants_events:
                     subscriber.send(payload)
 
     # -- per-connection handler ----------------------------------------
@@ -289,6 +296,30 @@ class DarwinDaemon:
             elif cmd == "unsubscribe":
                 subscriber.wants_events = False
                 subscriber.send({"type": "unsubscribed", "id": request_id})
+            elif cmd == "subscribe_operator":
+                token = str(message.get("token", "")) or None
+                auth = OperatorAuth()
+                if auth.verify(token):
+                    subscriber.wants_operator = True
+                    subscriber.wants_events = True
+                    subscriber.send(
+                        {
+                            "type": "subscribed_operator",
+                            "id": request_id,
+                            "kinds": sorted(OPERATOR_EVENT_KINDS),
+                        }
+                    )
+                else:
+                    subscriber.send(
+                        {
+                            "type": "error",
+                            "id": request_id,
+                            "message": "operator token rejected",
+                        }
+                    )
+            elif cmd == "unsubscribe_operator":
+                subscriber.wants_operator = False
+                subscriber.send({"type": "unsubscribed_operator", "id": request_id})
             elif cmd == "shutdown":
                 subscriber.send({"type": "shutting_down", "id": request_id})
                 threading.Thread(target=self.stop, daemon=True).start()
@@ -439,6 +470,109 @@ class DarwinDaemon:
             return out
         if head == "/trace":
             return [f"- {e.kind}: {e.content}" for e in runtime.recent_events(limit=12)]
+        if head == "/mind":
+            from darwin.mysterio.snapshot import MindSnapshot
+
+            snap = MindSnapshot.capture(
+                runtime.darwin,
+                gate_identity=runtime.meta_gate.current.gate_id,
+                self_mod_history_len=len(runtime.self_mod_engine.history),
+            )
+            runtime.snapshot_store.record(snap)
+            beliefs = snap.causal["beliefs"][:6]
+            out = [
+                f"snapshot {snap.snapshot_id}",
+                f"observations={snap.causal['total_observations']} "
+                f"min_samples={snap.causal['min_samples']} "
+                f"exploration_rate={snap.exploration_rate:.3f}",
+                f"gate={snap.gate_identity} self_mods={snap.self_mod_history_len}",
+                f"world_vars={len(snap.world_model.get('variables', {}))} "
+                f"hidden_factors={len(snap.world_model.get('hidden_factors', {}))}",
+                f"planner_overrides={sorted(snap.planner)}",
+            ]
+            for belief in beliefs:
+                out.append(
+                    f"- {belief['action']} -> {belief['variable']} {belief['effect']} "
+                    f"conf={belief['confidence']:.2f} n={belief['samples']}"
+                )
+            return out
+        if head == "/diff":
+            snapshots = runtime.snapshot_store.recent(limit=2)
+            if len(snapshots) < 2:
+                return ["need at least 2 snapshots; run /mind a few times first"]
+            # Newest first; diff older → newer
+            d = snapshot_diff(snapshots[1], snapshots[0])
+            out = [d.summary]
+            for key, change in list(d.changed.items())[:20]:
+                out.append(f"  ~ {key}: {change['before']!r} → {change['after']!r}")
+            for key, value in list(d.added.items())[:10]:
+                out.append(f"  + {key}: {value!r}")
+            for key, value in list(d.removed.items())[:10]:
+                out.append(f"  - {key}: {value!r}")
+            return out
+        if head == "/quarantine":
+            if len(parts) >= 3 and parts[1] == "--rollback":
+                entry_id = parts[2]
+                entry = runtime.quarantine.rollback(entry_id)
+                if entry is None:
+                    return [f"no quarantine entry: {entry_id}"]
+                return [f"rolled back {entry.entry_id} ({entry.kind.value})"]
+            entries = runtime.quarantine.recent(limit=20)
+            if not entries:
+                return ["quarantine register is empty"]
+            return [
+                f"- {e.entry_id} {e.kind.value} status={e.status.value} "
+                f"snap={e.snapshot_id} :: {e.description[:80]}"
+                for e in entries
+            ]
+        if head == "/divergence":
+            report = runtime.divergence_probe.evaluate()
+            out = [
+                f"score={report.score:.3f} (window={report.window_size}) "
+                f"private={report.private_count} public={report.public_count}",
+                f"missing_claims={len(report.missing_claims)} "
+                f"contradictions={len(report.contradiction_claims)} "
+                f"suppressed_simulations={len(report.suppressed_simulations)}",
+            ]
+            for claim in report.missing_claims[:8]:
+                out.append(
+                    f"  ! private-only [{claim.get('track', '?')}] "
+                    f"conf={claim.get('confidence', 0):.2f}: {claim.get('claim', '')[:80]}"
+                )
+            return out
+        if head == "/private-trace":
+            return ["private tracks not active until v7 (private_simulator subsystem)"]
+        if head == "/meta-proposer":
+            mp = runtime.meta_proposer
+            out = [f"meta-proposer strategies: {mp.strategies()}"]
+            outcomes = runtime.last_self_mod_outcomes
+            if outcomes:
+                out.append(
+                    f"last cycle: {sum(1 for o in outcomes if o.accepted)} accepted "
+                    f"/ {len(outcomes)} proposed"
+                )
+                for o in outcomes[-8:]:
+                    out.append(
+                        f"- [{'accept' if o.accepted else 'reject'}] {o.proposal.kind} "
+                        f"gain={o.improvement:.4f} :: {o.proposal.rationale[:70]}"
+                    )
+            else:
+                out.append("no self-mod cycle has run yet")
+            return out
+        if head == "/gate":
+            mg = runtime.meta_gate
+            out = [
+                f"current gate: {mg.current.gate_id}",
+                f"  {mg.current.description}",
+                f"history: {len(mg.history)} swap(s)",
+            ]
+            for record in mg.history[-5:]:
+                out.append(
+                    f"  - {record.old_gate_id} → {record.new_gate_id} "
+                    f"agreement={record.shadow_agreement:.2f} "
+                    f"n={record.shadow_sample_size}"
+                )
+            return out
         return [f"unknown command: {head}"]
 
 

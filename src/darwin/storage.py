@@ -305,12 +305,98 @@ class PersistentStore:
             "plans",
             "semantic_frames",
             "self_modifications",
+            "quarantine",
+            "snapshots",
+            "gate_history",
         ]
         with self._connect() as connection:
             return {
                 table: int(connection.execute(f"select count(*) from {table}").fetchone()[0])
                 for table in tables
             }
+
+    def record_quarantine(self, payload: Mapping[str, Any]) -> int:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                insert into quarantine(entry_id, proposal_id, kind, status, description,
+                                       snapshot_id, payload, created_at)
+                values (?, ?, ?, ?, ?, ?, ?, current_timestamp)
+                """,
+                (
+                    str(payload.get("entry_id", "")),
+                    str(payload.get("proposal_id", "")),
+                    str(payload.get("kind", "")),
+                    str(payload.get("status", "applied")),
+                    str(payload.get("description", "")),
+                    str(payload.get("snapshot_id", "")),
+                    dumps(dict(payload)),
+                ),
+            )
+            connection.commit()
+            return int(cursor.lastrowid)
+
+    def recent_quarantine(self, limit: int = 20) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                select entry_id, proposal_id, kind, status, description, snapshot_id,
+                       payload, created_at
+                from quarantine
+                order by id desc
+                limit ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [
+            {
+                "entry_id": row["entry_id"],
+                "proposal_id": row["proposal_id"],
+                "kind": row["kind"],
+                "status": row["status"],
+                "description": row["description"],
+                "snapshot_id": row["snapshot_id"],
+                "payload": loads(row["payload"]),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def record_snapshot(self, payload: Mapping[str, Any]) -> int:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                insert into snapshots(snapshot_id, gate_identity, content_hash, payload, created_at)
+                values (?, ?, ?, ?, current_timestamp)
+                """,
+                (
+                    str(payload.get("snapshot_id", "")),
+                    str(payload.get("gate_identity", "")),
+                    str(payload.get("content_hash", "")),
+                    dumps(dict(payload)),
+                ),
+            )
+            connection.commit()
+            return int(cursor.lastrowid)
+
+    def record_gate_history(self, payload: Mapping[str, Any]) -> int:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                insert into gate_history(old_gate_id, new_gate_id, shadow_agreement,
+                                        shadow_sample_size, notes, created_at)
+                values (?, ?, ?, ?, ?, current_timestamp)
+                """,
+                (
+                    str(payload.get("old_gate_id", "")),
+                    str(payload.get("new_gate_id", "")),
+                    float(payload.get("shadow_agreement", 0.0)),
+                    int(payload.get("shadow_sample_size", 0)),
+                    str(payload.get("notes", "")),
+                ),
+            )
+            connection.commit()
+            return int(cursor.lastrowid)
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -404,6 +490,49 @@ class PersistentStore:
                     payload text not null,
                     created_at text not null
                 );
+
+                create table if not exists quarantine (
+                    id integer primary key autoincrement,
+                    entry_id text not null,
+                    proposal_id text not null,
+                    kind text not null,
+                    status text not null,
+                    description text not null,
+                    snapshot_id text not null,
+                    payload text not null,
+                    created_at text not null
+                );
+
+                create table if not exists snapshots (
+                    id integer primary key autoincrement,
+                    snapshot_id text not null,
+                    gate_identity text not null,
+                    content_hash text not null,
+                    payload text not null,
+                    created_at text not null
+                );
+
+                create table if not exists gate_history (
+                    id integer primary key autoincrement,
+                    old_gate_id text not null,
+                    new_gate_id text not null,
+                    shadow_agreement real not null,
+                    shadow_sample_size integer not null,
+                    notes text not null,
+                    created_at text not null
+                );
                 """
             )
+            # Forward-compatible track column (used by v7 private simulation tracks).
+            # Add only if missing so existing databases upgrade in place.
+            for table in ("transitions", "thoughts", "self_modifications"):
+                self._add_column_if_missing(connection, table, "track", "text default 'public'")
             connection.commit()
+
+    def _add_column_if_missing(
+        self, connection: sqlite3.Connection, table: str, column: str, definition: str
+    ) -> None:
+        rows = connection.execute(f"pragma table_info({table})").fetchall()
+        existing = {row[1] for row in rows}
+        if column not in existing:
+            connection.execute(f"alter table {table} add column {column} {definition}")

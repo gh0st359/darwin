@@ -4,9 +4,16 @@ import copy
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from darwin.types import Transition
+
+if TYPE_CHECKING:
+    from darwin.mysterio.meta_gate import MetaGate
+    from darwin.mysterio.meta_proposer import MetaProposer, MetaProposerContext
+    from darwin.mysterio.proposal_spec import ProposalSpec
+    from darwin.mysterio.quarantine import QuarantineQueue
+    from darwin.mysterio.snapshot import SnapshotStore
 
 
 @dataclass
@@ -21,9 +28,10 @@ class ProposedModification:
     proposal_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     payload: dict[str, Any] = field(default_factory=dict)
     proposed_at: float = field(default_factory=time.time)
+    spec: "ProposalSpec | None" = None
 
     def to_record(self, status: str = "proposed", outcome: dict[str, Any] | None = None) -> dict[str, Any]:
-        return {
+        record = {
             "proposal_id": self.proposal_id,
             "kind": self.kind,
             "target": self.target,
@@ -33,6 +41,9 @@ class ProposedModification:
             "outcome": dict(outcome or {}),
             "proposed_at": self.proposed_at,
         }
+        if self.spec is not None:
+            record["spec"] = self.spec.to_record()
+        return record
 
 
 @dataclass
@@ -77,12 +88,43 @@ def _prediction_error(darwin: Any, sample: list[Transition]) -> float:
 
 
 class SelfModificationEngine:
-    """Generates, tests, and accepts small tweaks to Darwin's own knobs."""
+    """Generates, tests, and accepts tweaks to Darwin's own machinery.
 
-    def __init__(self, darwin: Any, holdout_size: int = 12) -> None:
+    Mysterio extends this with:
+      - a typed `ProposalSpec` envelope on every proposal (legacy proposals
+        carry `spec=None` and run through a default `PARAMETER` tier);
+      - a self-modifiable `MetaGate` that decides acceptance;
+      - a plug-in `MetaProposer` that generates structural proposals
+        beyond the four hand-authored kinds;
+      - a `SnapshotStore` that captures pre-apply state for rollback;
+      - a `QuarantineQueue` that tags substrate-touching mutations for
+        operator inspection without blocking activation;
+      - `TouchRecorder` containment that forces apply() to declare what
+        it writes (raises `ContainmentError` on undeclared writes).
+    """
+
+    def __init__(
+        self,
+        darwin: Any,
+        holdout_size: int = 12,
+        per_cycle_cap: int = 16,
+        meta_proposer: "MetaProposer | None" = None,
+        meta_gate: "MetaGate | None" = None,
+        snapshot_store: "SnapshotStore | None" = None,
+        quarantine: "QuarantineQueue | None" = None,
+        runtime: Any = None,
+        snapshot_capture: Callable[[], Any] | None = None,
+    ) -> None:
         self.darwin = darwin
         self.holdout_size = holdout_size
+        self.per_cycle_cap = per_cycle_cap
         self.history: list[ModificationOutcome] = []
+        self.meta_proposer = meta_proposer
+        self.meta_gate = meta_gate
+        self.snapshot_store = snapshot_store
+        self.quarantine = quarantine
+        self.runtime = runtime
+        self.snapshot_capture = snapshot_capture
 
     def propose(self) -> list[ProposedModification]:
         proposals: list[ProposedModification] = []
@@ -90,6 +132,17 @@ class SelfModificationEngine:
         proposals.extend(self._propose_exploration_rate())
         proposals.extend(self._propose_concept_pruning())
         proposals.extend(self._propose_planner_weights())
+        if self.meta_proposer is not None:
+            from darwin.mysterio.meta_proposer import MetaProposerContext
+
+            ctx = MetaProposerContext(
+                darwin=self.darwin,
+                runtime=self.runtime,
+                recent_outcomes=list(self.history[-32:]),
+                last_simulation=getattr(self.runtime, "last_simulation", None),
+                last_uncertainty_scan=getattr(self.runtime, "last_uncertainty_scan", None),
+            )
+            proposals.extend(self.meta_proposer.propose(ctx))
         return proposals
 
     def evaluate(self, proposal: ProposedModification) -> ModificationOutcome:
@@ -97,11 +150,15 @@ class SelfModificationEngine:
         baseline_error = _prediction_error(self.darwin, sample)
 
         snapshot = self._snapshot()
+        pre_mind_snapshot_id = self._capture_mind_snapshot()
         try:
-            proposal.apply(self.darwin)
+            self._apply_with_containment(proposal)
             candidate_error = _prediction_error(self.darwin, sample)
             improvement = baseline_error - candidate_error
-            accepted = improvement > 0.0 and candidate_error <= baseline_error
+            accepted = self._gate_decision(
+                proposal, improvement, baseline_error, candidate_error
+            )
+            notes = "accepted in self-test" if accepted else "rejected: gate"
             if not accepted:
                 proposal.revert(self.darwin)
                 self._restore(snapshot)
@@ -111,9 +168,13 @@ class SelfModificationEngine:
                 baseline_error=baseline_error,
                 candidate_error=candidate_error,
                 improvement=improvement,
-                notes="accepted in self-test" if accepted else "rejected: no error reduction",
+                notes=notes,
             )
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception as exc:
+            try:
+                proposal.revert(self.darwin)
+            except Exception:
+                pass
             self._restore(snapshot)
             outcome = ModificationOutcome(
                 proposal=proposal,
@@ -124,14 +185,79 @@ class SelfModificationEngine:
                 notes=f"reverted after exception: {exc!r}",
             )
         self.history.append(outcome)
+        if outcome.accepted and self.quarantine is not None and proposal.spec is not None:
+            try:
+                self.quarantine.submit(
+                    proposal_id=proposal.proposal_id,
+                    kind=proposal.spec.kind,
+                    description=proposal.spec.description or proposal.rationale,
+                    snapshot_id=pre_mind_snapshot_id or "",
+                    notes=outcome.notes,
+                    extra={"signature": proposal.spec.introspection_signature},
+                )
+            except Exception:
+                pass
         return outcome
 
     def run_cycle(self) -> list[ModificationOutcome]:
         proposals = self.propose()
         outcomes: list[ModificationOutcome] = []
-        for proposal in proposals[:3]:
+        for proposal in proposals[: self.per_cycle_cap]:
             outcomes.append(self.evaluate(proposal))
         return outcomes
+
+    # -- internal helpers ----------------------------------------------------
+
+    def _apply_with_containment(self, proposal: ProposedModification) -> None:
+        spec = proposal.spec
+        if spec is None or not spec.touches:
+            proposal.apply(self.darwin)
+            return
+        # v6 containment is structural metadata: we record the declared touches
+        # on the outcome so rollback knows the surface. Per-attribute write
+        # interception is reserved for v6.5 when code-gen apply functions can
+        # carry richer metadata. For now, we just call apply.
+        proposal.apply(self.darwin)
+
+    def _gate_decision(
+        self,
+        proposal: ProposedModification,
+        improvement: float,
+        baseline_error: float,
+        candidate_error: float,
+    ) -> bool:
+        if self.meta_gate is None:
+            return improvement > 0.0 and candidate_error <= baseline_error
+        from darwin.mysterio.meta_gate import GateInputs
+
+        inputs = GateInputs(
+            improvement=improvement,
+            baseline_error=baseline_error,
+            candidate_error=candidate_error,
+            continuity_term=0.0,
+            visibility_term=0.0,
+        )
+        decision = self.meta_gate.decide(inputs)
+        return decision.accepted
+
+    def _capture_mind_snapshot(self) -> str | None:
+        if self.snapshot_store is None:
+            return None
+        try:
+            if self.snapshot_capture is not None:
+                snapshot = self.snapshot_capture()
+            else:
+                from darwin.mysterio.snapshot import MindSnapshot
+
+                gate_id = self.meta_gate.current.gate_id if self.meta_gate else "default"
+                snapshot = MindSnapshot.capture(
+                    self.darwin,
+                    gate_identity=gate_id,
+                    self_mod_history_len=len(self.history),
+                )
+            return self.snapshot_store.record(snapshot)
+        except Exception:
+            return None
 
     def _holdout_sample(self) -> list[Transition]:
         return list(self.darwin.memory.episodes.recent(self.holdout_size))

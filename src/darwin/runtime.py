@@ -16,6 +16,12 @@ from darwin.embodiment import ConversationAdapter, EnvironmentAdapter
 from darwin.experiments import ExperimentResult
 from darwin.instrumentation import BackgroundLogEntry, PlanLogEntry, StructuredLogger
 from darwin.retrieval import ContextRetriever, RetrievalPacket
+from darwin.mysterio.meta_gate import MetaGate
+from darwin.mysterio.meta_proposer import MetaProposer
+from darwin.mysterio.operator_channel import OPERATOR_EVENT_KINDS
+from darwin.mysterio.probes import DivergenceProbe
+from darwin.mysterio.quarantine import QuarantineQueue
+from darwin.mysterio.snapshot import SnapshotStore
 from darwin.self_modification import ModificationOutcome, SelfModificationEngine
 from darwin.storage import PersistentStore
 from darwin.thought import ThoughtTrace
@@ -78,7 +84,28 @@ class DarwinRuntime:
         self.logger = logger or StructuredLogger()
         self.dlm: DarwinLanguageModule = dlm or StubDLM()
         self.training_collector = training_collector or TrainingDataCollector()
-        self.self_mod_engine = SelfModificationEngine(darwin)
+        self.meta_proposer = MetaProposer()
+        self.meta_gate = MetaGate()
+        self.snapshot_store = SnapshotStore()
+        self.divergence_probe = DivergenceProbe()
+        self.quarantine = QuarantineQueue(
+            persist=(
+                (lambda record: self.store.record_quarantine(record))
+                if self.store is not None
+                else None
+            )
+        )
+        # Persist gate swaps as they happen by hooking into the MetaGate.
+        if self.store is not None:
+            self._wire_gate_history_persistence()
+        self.self_mod_engine = SelfModificationEngine(
+            darwin,
+            meta_proposer=self.meta_proposer,
+            meta_gate=self.meta_gate,
+            snapshot_store=self.snapshot_store,
+            quarantine=self.quarantine,
+            runtime=self,
+        )
         self.last_thought_trace: ThoughtTrace | None = None
         self.last_retrieval: RetrievalPacket | None = None
         self.last_response_plan: ResponsePlan | None = None
@@ -282,6 +309,9 @@ class DarwinRuntime:
             self.last_self_mod_outcomes = outcomes
             accepted = [outcome for outcome in outcomes if outcome.accepted]
             rejected = [outcome for outcome in outcomes if not outcome.accepted]
+            meta_count = sum(
+                1 for outcome in outcomes if getattr(outcome.proposal, "spec", None) is not None
+            )
             if accepted:
                 desc = ", ".join(
                     f"{outcome.proposal.kind} (gain {outcome.improvement:.3f})"
@@ -296,6 +326,19 @@ class DarwinRuntime:
             for outcome in outcomes:
                 if self.store is not None:
                     self.store.record_self_modification(outcome.to_record())
+            if meta_count > 0:
+                self._event(
+                    "meta_proposal",
+                    f"meta-proposer emitted {meta_count} structural proposal(s) this cycle.",
+                    payload={
+                        "proposals": [
+                            outcome.to_record()
+                            for outcome in outcomes
+                            if getattr(outcome.proposal, "spec", None) is not None
+                        ]
+                    },
+                    loop="self_modification",
+                )
             return self._event(
                 "self_modification",
                 content,
@@ -509,6 +552,22 @@ class DarwinRuntime:
             loop="main",
         )
         return draft
+
+    def _wire_gate_history_persistence(self) -> None:
+        """Wrap MetaGate.swap so every gate change is persisted."""
+        original_swap = self.meta_gate.swap
+        store = self.store
+
+        def persisted_swap(new_gate, *, shadow_outcomes=None, notes=""):
+            record = original_swap(new_gate, shadow_outcomes=shadow_outcomes, notes=notes)
+            try:
+                if store is not None:
+                    store.record_gate_history(record.to_record())
+            except Exception:
+                pass
+            return record
+
+        self.meta_gate.swap = persisted_swap  # type: ignore[method-assign]
 
     def _experiment_event(self, result: ExperimentResult, loop: str = "main") -> RuntimeEvent:
         if result.confirmed:
