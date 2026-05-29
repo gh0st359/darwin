@@ -562,7 +562,7 @@ class DarwinRuntime:
                 pass
 
             user_frame = self.darwin.interpret_language(message, source="user")
-            response = self._respond(message, user_frame)
+            response = self._respond(message, user_frame, user_id=user_id)
             # Feed the rendered reply into the divergence probe as grounded
             # claims so the brain terminal can see the gap between what
             # Darwin reasoned and what it actually said.
@@ -627,7 +627,7 @@ class DarwinRuntime:
 
     # -- internal --------------------------------------------------------
 
-    def _respond(self, message: str, semantic_frame) -> str:
+    def _respond(self, message: str, semantic_frame, user_id: str | None = None) -> str:
         trace = ThoughtTrace(user_text=message, semantic_summary=semantic_frame.summary())
         trace.add(
             "parse",
@@ -656,6 +656,12 @@ class DarwinRuntime:
             goal=self.goal,
             recent_events=self.recent_events(limit=5),
         )
+        try:
+            preferred = self.operator_models.get(user_id).preferred_length(plan.mode)
+            if preferred in {"short", "medium", "long"}:
+                plan.target_length = preferred
+        except Exception:
+            pass
         trace.add(
             "plan",
             f"{plan.mode}: {plan.intent}",

@@ -599,6 +599,50 @@ class DarwinDaemon:
             for path, sha in sorted(manifest.items()):
                 out.append(f"- {path} sha={sha[:12]}")
             return out
+        if head == "/strategic":
+            manager = getattr(runtime, "strategic_threads", None)
+            if manager is None:
+                return ["strategic thread manager not active"]
+            summary = manager.summary()
+            out = [
+                f"open={summary['open']} total={summary['total']} "
+                f"long_horizon={summary['long_horizon']}",
+                f"by_track={summary.get('by_track', {})}",
+            ]
+            for thread in manager.open_threads()[:10]:
+                age_days = thread.age_seconds / 86400.0
+                out.append(
+                    f"- [{thread.thread_id[:8]}] {thread.goal!r} "
+                    f"track={thread.track} age={age_days:.1f}d "
+                    f"reflections={len(thread.reflections)} score={thread.score:.2f}"
+                )
+            return out
+        if head == "/memory":
+            tiers = getattr(runtime, "memory_tiers", None)
+            if tiers is None:
+                return ["memory tier stack not active"]
+            return [
+                f"episodic={tiers.episodic.size()} "
+                f"semantic={tiers.semantic.size()} "
+                f"conceptual={tiers.conceptual.size()} "
+                f"archetypal={tiers.archetypal.size()} "
+                f"narrative={tiers.narrative.size()}",
+            ]
+        if head == "/operator-style":
+            registry = getattr(runtime, "operator_models", None)
+            if registry is None:
+                return ["operator-model registry not active"]
+            out = [f"known_users={registry.known_users()}"]
+            for user_id in registry.known_users():
+                model = registry.get(user_id)
+                rec = model.to_record()
+                out.append(
+                    f"- {user_id}: samples={rec['samples']} "
+                    f"avg_words={rec['avg_words']:.1f} "
+                    f"verbosity={rec['preferred_verbosity']} "
+                    f"interests={rec['top_interests'][:5]}"
+                )
+            return out
         if head == "/bus":
             stats = runtime.bus.stats()
             out = [
