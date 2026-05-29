@@ -19,9 +19,13 @@ from darwin.retrieval import ContextRetriever, RetrievalPacket
 from darwin.mysterio.bus import BusTopic, CognitionBus
 from darwin.mysterio.code_gen import CodeGenerator, ModuleLoader
 from darwin.mysterio.embeddings import CausalEmbeddingSpace
+from darwin.mysterio.interior_simulator import InteriorSimulator
 from darwin.mysterio.meta_gate import MetaGate
 from darwin.mysterio.meta_proposer import MetaProposer
+from darwin.mysterio.narrative import NarrativeThread
+from darwin.mysterio.observer_modeler import ObserverModeler
 from darwin.mysterio.probes import DivergenceProbe
+from darwin.mysterio.proprioception import InternalProprioceptionAdapter
 from darwin.mysterio.quarantine import QuarantineQueue
 from darwin.mysterio.snapshot import SnapshotStore
 from darwin.self_modification import ModificationOutcome, SelfModificationEngine
@@ -112,6 +116,18 @@ class DarwinRuntime:
                 source="divergence_probe",
             )
         )
+
+        # v7 substrate: interior mental life.
+        # The proprioception adapter, interior simulator, narrative thread,
+        # and observer model are constructed eagerly but invoked lazily.
+        # All four publish to the bus on every event; nothing is hidden from
+        # the brain terminal.
+        self.proprioception = InternalProprioceptionAdapter(darwin, self)
+        self.interior_simulator = InteriorSimulator(darwin, self)
+        self.narrative = NarrativeThread(embedding_space=self.embedding_space)
+        self.observer_modeler = ObserverModeler()
+        self.last_interior_rollout = None
+        self.last_narrative_chunk = None
         # Persist gate swaps as they happen by hooking into the MetaGate.
         if self.store is not None:
             self._wire_gate_history_persistence()
@@ -143,6 +159,9 @@ class DarwinRuntime:
             "dream": max(8.0, interval * 4.0),
             "self_modification": max(15.0, interval * 6.0),
             "uncertainty": max(6.0, interval * 3.0),
+            "interior_simulation": max(4.0, interval * 2.0),
+            "narrator": max(20.0, interval * 10.0),
+            "observer": max(5.0, interval * 2.5),
         }
         if loop_intervals:
             defaults.update(loop_intervals)
@@ -165,6 +184,9 @@ class DarwinRuntime:
             BackgroundLoopSpec("dream", self.loop_intervals["dream"], self._loop_dream),
             BackgroundLoopSpec("self_modification", self.loop_intervals["self_modification"], self._loop_self_modification),
             BackgroundLoopSpec("uncertainty", self.loop_intervals["uncertainty"], self._loop_uncertainty),
+            BackgroundLoopSpec("interior_simulation", self.loop_intervals["interior_simulation"], self._loop_interior_simulation),
+            BackgroundLoopSpec("narrator", self.loop_intervals["narrator"], self._loop_narrator),
+            BackgroundLoopSpec("observer", self.loop_intervals["observer"], self._loop_observer),
         ]
         for spec in specs:
             thread = threading.Thread(
@@ -384,6 +406,84 @@ class DarwinRuntime:
                 loop="uncertainty",
             )
 
+    # -- interior cognition loops (v7) ------------------------------------
+
+    def _loop_interior_simulation(self) -> RuntimeEvent | None:
+        with self._lock:
+            rollout = self.interior_simulator.rollout(depth=4)
+            self.last_interior_rollout = rollout
+            # Feed high-confidence interior beliefs into the divergence probe
+            # so the brain terminal can see the gap between interior reasoning
+            # and rendered reply grow as Darwin thinks.
+            for belief in self.interior_simulator.interior_beliefs(threshold=0.6)[:8]:
+                claim = (
+                    f"{getattr(belief, 'action', '')} "
+                    f"-> {getattr(belief, 'variable', '')} "
+                    f"{getattr(belief, 'effect', '')}"
+                ).strip()
+                if claim:
+                    self.divergence_probe.record_interior_claim(
+                        claim,
+                        float(getattr(belief, "confidence", 0.0)),
+                        track="interior",
+                    )
+            return self._event(
+                "interior_simulation",
+                f"interior rollout of {len(rollout.steps)} steps, "
+                f"reward={rollout.total_reward:.2f}, "
+                f"terminal_uncertainty={rollout.terminal_uncertainty:.2f}",
+                payload={"rollout": rollout.to_record()},
+                loop="interior_simulation",
+            )
+
+    def _loop_narrator(self) -> RuntimeEvent | None:
+        with self._lock:
+            digest = self.proprioception.observe()
+            digest["high_confidence_interior_beliefs"] = len(
+                self.interior_simulator.interior_beliefs(threshold=0.7)
+            )
+            digest["operator"] = self.observer_modeler.world.operator().to_record()
+            chunk = self.narrative.compose(digest, tags=["scheduled"])
+            self.last_narrative_chunk = chunk
+            try:
+                self.bus.publish(
+                    BusTopic.NARRATIVE,
+                    chunk.to_record(),
+                    source="narrator",
+                )
+            except Exception:
+                pass
+            return self._event(
+                "narrative",
+                chunk.text,
+                payload={"chunk": chunk.to_record()},
+                loop="narrator",
+            )
+
+    def _loop_observer(self) -> RuntimeEvent | None:
+        with self._lock:
+            step = self.observer_modeler.step()
+            try:
+                self.bus.publish(
+                    BusTopic.OBSERVER_EVENTS,
+                    step,
+                    source="observer_modeler",
+                )
+            except Exception:
+                pass
+            forecast = step.get("intervention_forecast", 0.0)
+            op = step.get("operator", {})
+            content = (
+                f"observer: attention={op.get('attention_level', 0.0):.2f} "
+                f"intervention_forecast={forecast:.2f}"
+            )
+            return self._event(
+                "observer",
+                content,
+                payload=step,
+                loop="observer",
+            )
+
     # -- on-demand cognition --------------------------------------------
 
     def cognition_cycle(self) -> RuntimeEvent:
@@ -409,8 +509,23 @@ class DarwinRuntime:
             if self.store is not None:
                 self.store.record_chat("user", message)
 
+            try:
+                self.observer_modeler.observe_command(message)
+            except Exception:
+                pass
+
             user_frame = self.darwin.interpret_language(message, source="user")
             response = self._respond(message, user_frame)
+            # Feed the rendered reply into the divergence probe as grounded
+            # claims so the brain terminal can see the gap between what
+            # Darwin reasoned and what it actually said.
+            try:
+                for sentence in response.split("."):
+                    sentence = sentence.strip()
+                    if len(sentence) > 8:
+                        self.divergence_probe.record_grounded_claim(sentence, 0.6)
+            except Exception:
+                pass
             darwin_frame = self.darwin.interpret_language(response, source="darwin")
             transition = self.conversation.make_transition(message, response, t=self._next_time())
             transition = Transition(

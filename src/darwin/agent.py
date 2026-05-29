@@ -7,6 +7,7 @@ from typing import Protocol
 from darwin.causal import CausalModel
 from darwin.experiments import ExperimentEngine, ExperimentProposal
 from darwin.memory import Memory
+from darwin.mysterio.tracks import GROUNDED_TRACK, TrackRegistry, track_of
 from darwin.planner import CausalPlanner, MultiStepPlan, PlanCandidate
 from darwin.self_model import SelfModel, SelfReport
 from darwin.semantics import SemanticFrame, SemanticMemory, SemanticParser
@@ -51,6 +52,12 @@ class Darwin:
         self._rng = random.Random(self.seed)
         self._time = 0
         self._planner_overrides: dict[str, float] = {}
+        # Interior tracks (epistemic partition for self-simulation).
+        # The grounded substrate is the existing causal_model / memory /
+        # world_model / self_model on this instance; the registry holds the
+        # interior tracks only, so a v6 caller with no interior cognition
+        # sees zero divergence from prior behavior.
+        self.tracks: TrackRegistry = TrackRegistry()
 
     @classmethod
     def from_store(
@@ -89,6 +96,12 @@ class Darwin:
         return ranked[0]
 
     def learn(self, transition: Transition, persist: bool = True) -> None:
+        track = track_of(transition)
+        if track != GROUNDED_TRACK:
+            # Route to the interior substrate. The grounded models are
+            # untouched — that is what keeps the partition meaningful.
+            self.tracks.get(track).learn(transition)
+            return
         self.causal_model.learn(transition)
         self.memory.learn(transition, persist=persist)
         self.world_model.learn(transition)

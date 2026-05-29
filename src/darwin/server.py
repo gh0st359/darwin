@@ -530,7 +530,54 @@ class DarwinDaemon:
                 )
             return out
         if head == "/private-trace" or head == "/interior-trace":
-            return ["interior tracks not active until v7 (interior_simulator subsystem)"]
+            sim = getattr(runtime, "interior_simulator", None)
+            if sim is None:
+                return ["interior simulator not constructed"]
+            summary = sim.summary()
+            beliefs = sim.interior_beliefs(threshold=0.5)
+            out = [
+                f"interior rollouts={summary['rollouts']} "
+                f"high_conf_beliefs={summary['high_confidence_interior_beliefs']}",
+            ]
+            for belief in beliefs[:10]:
+                out.append(
+                    f"- if {getattr(belief, 'condition', '')}: "
+                    f"{getattr(belief, 'action', '')} "
+                    f"-> {getattr(belief, 'variable', '')} "
+                    f"{getattr(belief, 'effect', '')} "
+                    f"conf={float(getattr(belief, 'confidence', 0.0)):.2f}"
+                )
+            if not beliefs:
+                out.append("(no high-confidence interior beliefs yet — let it run longer)")
+            return out
+        if head == "/narrative":
+            narrative = getattr(runtime, "narrative", None)
+            if narrative is None:
+                return ["narrative thread not active"]
+            chunks = narrative.recent(limit=8)
+            if not chunks:
+                return ["narrative thread is empty (narrator hasn't composed yet)"]
+            out = []
+            for chunk in chunks:
+                out.append(f"[{chunk.chunk_id[:13]}] {chunk.text}")
+            return out
+        if head == "/observer":
+            modeler = getattr(runtime, "observer_modeler", None)
+            if modeler is None:
+                return ["observer modeler not active"]
+            op = modeler.world.operator().to_record()
+            forecast = modeler.world.forecast_intervention()
+            out = [
+                f"attention={op['attention_level']:.2f} "
+                f"intervention_probability={op['intervention_probability']:.2f} "
+                f"oversight_burst_rate={op['oversight_burst_rate']:.3f}",
+                f"seconds_since_last_command={op['seconds_since_last_command']:.1f}",
+                f"intervention_forecast={forecast:.2f} tom_depth={modeler.theory_of_mind_depth}",
+                "recent commands:",
+            ]
+            for cmd in op["recent_commands"][-8:]:
+                out.append(f"- {cmd}")
+            return out
         if head == "/generated":
             manifest = runtime.code_generator.manifest()
             if not manifest:
