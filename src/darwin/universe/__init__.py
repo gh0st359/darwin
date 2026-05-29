@@ -32,7 +32,17 @@ from darwin.universe.language_universe import (
     content_words,
     tokenize,
 )
+from darwin.universe.answer import (
+    RenderedAnswer,
+    build_answer,
+    render_chain,
+    render_contradiction,
+    render_definition,
+    render_inference,
+    render_reasoning_summary,
+)
 from darwin.universe.primitive_seed import primitive_names, seed_primitives
+from darwin.universe.question import QuestionAnalysis, analyze_question
 from darwin.universe.reasoning import (
     ConceptualReasoner,
     ReasoningStep,
@@ -71,12 +81,21 @@ __all__ = [
     "InferenceEngine",
     "LanguageGrounder",
     "RELATION_KINDS",
+    "QuestionAnalysis",
     "ReasoningStep",
     "ReasoningTrace",
     "Relation",
+    "RenderedAnswer",
+    "analyze_question",
+    "build_answer",
     "build_default_universe",
     "content_words",
     "primitive_names",
+    "render_chain",
+    "render_contradiction",
+    "render_definition",
+    "render_inference",
+    "render_reasoning_summary",
     "seed_primitives",
     "tokenize",
 ]

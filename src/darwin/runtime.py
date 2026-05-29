@@ -47,6 +47,8 @@ from darwin.universe import (
     CuriosityEngine,
     InferenceEngine,
     LanguageGrounder,
+    analyze_question,
+    build_answer,
     build_default_universe,
 )
 from darwin.thought import ThoughtTrace
@@ -192,6 +194,8 @@ class DarwinRuntime:
         self.last_grounding = None
         self.last_inferences: list = []
         self.last_curiosity: list = []
+        self.last_question_analysis = None
+        self.last_rendered_answer = None
 
         # v9 substrate: open-ended growth.
         # WorldSynthesizer proposes new SUBSYSTEM specs that the code-gen
@@ -606,6 +610,9 @@ class DarwinRuntime:
             try:
                 self.last_grounding = self.grounder.ground(message)
                 self.deriver.observe_text(message)
+                self.last_question_analysis = analyze_question(
+                    message, self.last_grounding.concept_names,
+                )
                 self.last_reasoning_trace = self.reasoner.think(
                     query=message,
                     seeds=self.last_grounding.concept_names,
@@ -638,11 +645,40 @@ class DarwinRuntime:
                 # question Darwin would benefit from answering.
                 if not self.last_inferences:
                     self.last_curiosity = self.curiosity_engine.probe()[:3]
+                # Compose a prose answer from every available structure.
+                analysis = self.last_question_analysis
+                definitions = []
+                if analysis and analysis.kind == "definition":
+                    for name in analysis.primary_concepts + analysis.secondary_concepts:
+                        c = self.universe.get(name)
+                        if c is not None:
+                            definitions.append(c)
+                only_inferences = [
+                    i for i in self.last_inferences
+                    if hasattr(i, "operator")
+                ]
+                only_contradictions = [
+                    i for i in self.last_inferences
+                    if not hasattr(i, "operator") and hasattr(i, "reason")
+                ]
+                self.last_rendered_answer = build_answer(
+                    question_kind=analysis.kind if analysis else "unknown",
+                    grounded_concepts=self.last_grounding.concept_names,
+                    inferences=only_inferences,
+                    contradictions=only_contradictions,
+                    definitions=definitions,
+                    reasoning_trace=self.last_reasoning_trace,
+                    curiosity_questions=[
+                        p.question for p in (self.last_curiosity or [])
+                    ],
+                )
             except Exception:
                 self.last_grounding = None
                 self.last_reasoning_trace = None
                 self.last_inferences = []
                 self.last_curiosity = []
+                self.last_rendered_answer = None
+                self.last_question_analysis = None
 
             user_frame = self.darwin.interpret_language(message, source="user")
             response = self._respond(message, user_frame, user_id=user_id)
@@ -821,6 +857,43 @@ class DarwinRuntime:
             critique = self.critic.evaluate(plan, draft, semantic_frame, retrieval)
         else:
             trace.add("critic", "response passed self-critique", confidence=0.75)
+
+        # Universe-grounded answer override: if the inference engine
+        # produced derivations or definitions for the user's question, the
+        # rendered answer is substantively better than the v5 composer
+        # output for this turn. Prefer it. Confabulation-prone fallbacks
+        # (e.g. concede_uncertainty style) are NOT preferred over the v5
+        # path — those go through the standard discourse.
+        try:
+            rendered = self.last_rendered_answer
+            # Only prefer the universe-grounded answer when the inference
+            # engine itself produced a derivation we can show — neighborhood
+            # summaries and curiosity probes are NOT good enough to replace
+            # the v5 composer for this turn.
+            strong_inference_ops = {
+                "is_a_chain", "causal_chain", "shortest_path", "inheritance",
+                "contradiction", "definition",
+            }
+            has_real_inference = bool(
+                rendered is not None
+                and any(op in strong_inference_ops for op in rendered.used_inferences)
+            )
+            if (
+                has_real_inference
+                and rendered.style != "concede_uncertainty"
+                and rendered.text
+                and len(rendered.text) > 10
+            ):
+                draft = rendered.text
+                trace.add(
+                    "universe_answer",
+                    f"replaced DLM output with universe-grounded answer "
+                    f"({len(rendered.used_inferences)} inference(s))",
+                    confidence=0.85,
+                    evidence=rendered.used_inferences,
+                )
+        except Exception:
+            pass
 
         trace.final_mode = plan.mode
         trace.final_confidence = plan.confidence

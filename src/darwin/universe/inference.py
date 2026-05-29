@@ -184,9 +184,13 @@ class InferenceEngine:
         path = self._transitive_path(source, target, _CAUSAL_KINDS)
         if not path:
             return None
+        claim = (
+            f"{source} causes {target}" if len(path) == 1
+            else f"{source} ultimately causes {target}"
+        )
         return Inference(
             operator="causal_chain",
-            claim=f"{source} ultimately causes {target}",
+            claim=claim,
             source=source,
             target=target,
             chain=[rel.to_record() for rel in path],
