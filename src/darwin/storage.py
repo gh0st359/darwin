@@ -32,8 +32,10 @@ def loads(value: str) -> Any:
 class PersistentStore:
     """SQLite-backed durable memory for Darwin's experience stream."""
 
-    def __init__(self, path: str | Path = "darwin_memory.sqlite3") -> None:
-        self.path = Path(path)
+    def __init__(self, path: str | Path | None = None) -> None:
+        from darwin.paths import memory_path
+
+        self.path = Path(path) if path is not None else memory_path()
         self._lock = threading.RLock()
         self._initialize()
 

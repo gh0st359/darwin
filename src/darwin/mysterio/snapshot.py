@@ -190,7 +190,11 @@ class SnapshotStore:
     inspect snapshots out-of-band by reading the directory directly.
     """
 
-    def __init__(self, directory: str | Path = "darwin_snapshots") -> None:
+    def __init__(self, directory: str | Path | None = None) -> None:
+        if directory is None:
+            from darwin.paths import snapshots_dir
+
+            directory = snapshots_dir()
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True)
         self._index: dict[str, MindSnapshot] = {}

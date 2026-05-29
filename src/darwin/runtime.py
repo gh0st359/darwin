@@ -106,7 +106,7 @@ class DarwinRuntime:
         logger: StructuredLogger | None = None,
         dlm: DarwinLanguageModule | None = None,
         training_collector: TrainingDataCollector | None = None,
-        state_path: str | Path | None = "darwin_runtime_state.json",
+        state_path: str | Path | None = None,
         loop_intervals: dict[str, float] | None = None,
     ) -> None:
         self.darwin = darwin
@@ -268,7 +268,14 @@ class DarwinRuntime:
         self._stop = threading.Event()
         self._threads: dict[str, threading.Thread] = {}
         self._loop_state: dict[str, dict[str, Any]] = {}
-        self.state_path = Path(state_path) if state_path else None
+        if state_path is None:
+            from darwin.paths import runtime_state_path
+
+            self.state_path = runtime_state_path()
+        elif state_path is False or state_path == "":
+            self.state_path = None
+        else:
+            self.state_path = Path(state_path)
         defaults = {
             "experiment": interval,
             "simulation": max(2.5, interval * 1.5),

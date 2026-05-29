@@ -134,11 +134,21 @@ def load_universe(universe: ConceptUniverse, path: str | Path) -> int:
 
 
 def default_universe_path(memory_path: str | Path | None = None) -> Path:
-    """Conventional persistence path next to the sqlite memory file."""
+    """Conventional persistence path next to the sqlite memory file.
+
+    When no ``memory_path`` is supplied, the universe file lands at the
+    default location resolved through ``darwin.paths`` (which respects the
+    ``DARWIN_DATA_DIR`` environment variable used by the test harness).
+    When ``memory_path`` is supplied, the universe file sits next to it
+    with a ``_universe.json`` suffix so multiple memory files coexist
+    without colliding.
+    """
 
     if memory_path is None:
-        return Path("darwin_universe.json")
+        from darwin.paths import universe_path
+
+        return universe_path()
     p = Path(memory_path)
-    return p.parent / (p.stem + "_universe.json") if p.parent != Path() else Path(
-        p.stem + "_universe.json"
-    )
+    if p.parent == Path():
+        return Path(p.stem + "_universe.json")
+    return p.parent / (p.stem + "_universe.json")

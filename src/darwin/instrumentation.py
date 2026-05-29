@@ -73,14 +73,24 @@ class StructuredLogger:
 
     def __init__(
         self,
-        plan_log: Path | str = "training_logs/plans.jsonl",
-        background_log: Path | str = "training_logs/background.jsonl",
-        metrics_log: Path | str = "training_logs/metrics.jsonl",
+        plan_log: Path | str | None = None,
+        background_log: Path | str | None = None,
+        metrics_log: Path | str | None = None,
         enabled: bool = True,
     ) -> None:
-        self.plan_log = Path(plan_log)
-        self.background_log = Path(background_log)
-        self.metrics_log = Path(metrics_log)
+        from darwin.paths import (
+            background_log_path,
+            metrics_log_path,
+            plan_log_path,
+        )
+
+        self.plan_log = Path(plan_log) if plan_log is not None else plan_log_path()
+        self.background_log = (
+            Path(background_log) if background_log is not None else background_log_path()
+        )
+        self.metrics_log = (
+            Path(metrics_log) if metrics_log is not None else metrics_log_path()
+        )
         self.enabled = enabled
         self._lock = threading.RLock()
         self.metrics: dict[str, float] = {

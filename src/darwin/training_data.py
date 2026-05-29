@@ -71,10 +71,12 @@ class TrainingDataCollector:
 
     def __init__(
         self,
-        path: Path | str = "training_logs/dlm_training_pairs.jsonl",
+        path: Path | str | None = None,
         enabled: bool = True,
     ) -> None:
-        self.path = Path(path)
+        from darwin.paths import dlm_training_pairs_path
+
+        self.path = Path(path) if path is not None else dlm_training_pairs_path()
         self.enabled = enabled
         self._lock = threading.RLock()
         self.pairs: list[TrainingPair] = []
