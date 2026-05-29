@@ -720,6 +720,28 @@ class DarwinDaemon:
                     f"darwin: {turn.darwin_text[:80]!r}"
                 )
             return out
+        if head == "/hypotheses":
+            engine = getattr(runtime, "hypothesis_engine", None)
+            if engine is None:
+                return ["hypothesis engine not active"]
+            current = getattr(runtime, "last_hypotheses", None) or engine.surface()
+            if not current:
+                return ["no hypotheses yet"]
+            out = [f"hypotheses ({len(current)}):"]
+            for h in current[:20]:
+                out.append(
+                    f"  [{h.pathway} conf={h.confidence:.2f}] "
+                    f"{h.source} —{h.kind}→ {h.target}"
+                )
+                out.append(f"    rationale: {h.rationale}")
+            return out
+        if head == "/volunteer":
+            v = getattr(runtime, "last_volunteered", None)
+            if v is None:
+                return ["nothing volunteered from last turn"]
+            return [
+                f"[{v.source_kind} conf={v.confidence:.2f}] {v.text}",
+            ]
         if head == "/synthesis":
             synth = getattr(runtime, "last_synthesis", None)
             if synth is None:

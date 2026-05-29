@@ -165,12 +165,28 @@ class ConceptFusion:
         self._fused: list[FusedRelation] = []
 
     def fuse(self, text: str) -> FusionResult:
-        """Scan text for declarative statements and integrate them."""
+        """Scan text for declarative statements and integrate them.
+
+        Questions are skipped: a question is not an assertion. Fusion runs
+        only on text that looks declarative.
+        """
 
         result = FusionResult(text=text or "")
         if not text:
             return result
-        lowered = text.lower()
+        stripped = text.strip()
+        # Questions never assert relations.
+        if stripped.endswith("?"):
+            return result
+        lowered = stripped.lower()
+        # Interrogative openers signal a question even without a "?".
+        interrogative_openers = (
+            "is ", "are ", "was ", "were ", "do ", "does ", "did ",
+            "can ", "could ", "would ", "should ", "may ", "might ",
+            "what ", "why ", "how ", "when ", "where ", "which ", "who ",
+        )
+        if any(lowered.startswith(opener) for opener in interrogative_openers):
+            return result
         # Strip leading question words so "Tell me that X is a Y" still parses.
         lowered = re.sub(
             r"^\s*(?:tell me that|tell me|did you know|note that|remember that|fyi|btw)\s+",

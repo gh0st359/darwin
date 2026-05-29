@@ -47,11 +47,13 @@ from darwin.universe import (
     ConceptualReasoner,
     CuriosityEngine,
     DialogueMemory,
+    HypothesisEngine,
     InferenceEngine,
     LanguageGrounder,
     analyze_question,
     build_answer,
     build_default_universe,
+    choose_volunteer,
     synthesize,
     synthesize_self_introspection,
 )
@@ -196,6 +198,7 @@ class DarwinRuntime:
         self.curiosity_engine = CuriosityEngine(self.universe)
         self.concept_fusion = ConceptFusion(self.universe, bus=self.bus)
         self.dialogue_memory = DialogueMemory(capacity=64)
+        self.hypothesis_engine = HypothesisEngine(self.universe)
         self.last_reasoning_trace = None
         self.last_grounding = None
         self.last_inferences: list = []
@@ -204,6 +207,8 @@ class DarwinRuntime:
         self.last_rendered_answer = None
         self.last_fusion_result = None
         self.last_synthesis = None
+        self.last_hypotheses: list = []
+        self.last_volunteered = None
 
         # v9 substrate: open-ended growth.
         # WorldSynthesizer proposes new SUBSYSTEM specs that the code-gen
@@ -706,6 +711,26 @@ class DarwinRuntime:
                     )
                 else:
                     self.last_synthesis = None
+                # Generate hypotheses on every chat turn — keeps Darwin
+                # *ahead* of the operator instead of only reacting.
+                self.last_hypotheses = self.hypothesis_engine.generate()
+                # Don't re-volunteer the same hypothesis on consecutive turns.
+                recent_keys: list[tuple[str, str, str]] = []
+                for past_turn in self.dialogue_memory.latest(3):
+                    for tag in past_turn.inferences_used:
+                        # We stored volunteered hypothesis keys in inferences_used.
+                        if tag.startswith("hyp:"):
+                            parts = tag[4:].split("|")
+                            if len(parts) == 3:
+                                recent_keys.append(tuple(parts))  # type: ignore[arg-type]
+                self.last_volunteered = choose_volunteer(
+                    grounded_concepts=self.last_grounding.concept_names,
+                    hypotheses=self.last_hypotheses,
+                    contradictions=only_contradictions,
+                    curiosities=self.last_curiosity,
+                    last_question_kind=(analysis.kind if analysis else "unknown"),
+                    recently_volunteered=recent_keys,
+                )
             except Exception:
                 self.last_grounding = None
                 self.last_reasoning_trace = None
@@ -715,6 +740,8 @@ class DarwinRuntime:
                 self.last_question_analysis = None
                 self.last_fusion_result = None
                 self.last_synthesis = None
+                self.last_hypotheses = []
+                self.last_volunteered = None
 
             user_frame = self.darwin.interpret_language(message, source="user")
             response = self._respond(message, user_frame, user_id=user_id)
@@ -774,6 +801,18 @@ class DarwinRuntime:
                     inferences_used = list(self.last_rendered_answer.used_inferences)
                 if self.last_synthesis:
                     inferences_used.append(self.last_synthesis.style)
+                # Track which hypothesis was volunteered so we don't
+                # repeat it back to back.
+                if self.last_volunteered and self.last_volunteered.source_kind == "hypothesis":
+                    for h in self.last_hypotheses:
+                        if (
+                            h.source in self.last_volunteered.grounded_concepts
+                            or h.target in self.last_volunteered.grounded_concepts
+                        ):
+                            inferences_used.append(
+                                f"hyp:{h.source}|{h.kind}|{h.target}"
+                            )
+                            break
                 kind = (
                     self.last_question_analysis.kind
                     if self.last_question_analysis else "unknown"
@@ -1011,6 +1050,23 @@ class DarwinRuntime:
                             "no derivation; honest non-answer with curiosity probe",
                             confidence=0.4,
                         )
+        except Exception:
+            pass
+
+        # If Darwin has something worth volunteering, append it to the
+        # draft — keeps the chat surface alive with proactive observation
+        # while never overwriting the actual response to the user's input.
+        try:
+            volunteer = self.last_volunteered
+            if volunteer is not None and volunteer.text:
+                if draft and not draft.rstrip().endswith((".", "!", "?")):
+                    draft = draft.rstrip() + "."
+                draft = (draft + " " + volunteer.text).strip()
+                trace.add(
+                    "volunteered",
+                    f"appended a {volunteer.source_kind} remark",
+                    confidence=volunteer.confidence,
+                )
         except Exception:
             pass
 
