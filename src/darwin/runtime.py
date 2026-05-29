@@ -37,6 +37,7 @@ from darwin.mysterio.world_synthesis import WorldSynthesizer
 from darwin.mysterio.proprioception import InternalProprioceptionAdapter
 from darwin.mysterio.quarantine import QuarantineQueue
 from darwin.mysterio.snapshot import SnapshotStore
+from darwin.operator_model import OperatorModelRegistry
 from darwin.self_modification import ModificationOutcome, SelfModificationEngine
 from darwin.storage import PersistentStore
 from darwin.thought import ThoughtTrace
@@ -148,6 +149,11 @@ class DarwinRuntime:
         self.observer_cascade = ObserverCascade(
             self.observer_modeler.world, max_depth=4
         )
+
+        # v6.5 conversational substrate: per-user conversational-style model
+        # (distinct from v7 ObserverModeler, which tracks attention and
+        # intervention probability — this tracks how the user *converses*).
+        self.operator_models = OperatorModelRegistry()
 
         # v9 substrate: open-ended growth.
         # WorldSynthesizer proposes new SUBSYSTEM specs that the code-gen
@@ -541,13 +547,17 @@ class DarwinRuntime:
 
     # -- conversation ----------------------------------------------------
 
-    def chat(self, message: str) -> str:
+    def chat(self, message: str, user_id: str | None = None) -> str:
         with self._lock:
             if self.store is not None:
                 self.store.record_chat("user", message)
 
             try:
                 self.observer_modeler.observe_command(message)
+            except Exception:
+                pass
+            try:
+                self.operator_models.get(user_id).observe(message)
             except Exception:
                 pass
 

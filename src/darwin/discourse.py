@@ -136,6 +136,20 @@ class DiscoursePlanner:
 
     SOCIAL_MODES = {"greeting", "farewell", "small_talk", "identity"}
 
+    # v6.5 modes — richer ResponsePlan shapes for genuine dialogue.
+    # `probe`: Darwin asks a back-question because the request is underspecified.
+    # `clarify_request`: a focused clarification when the planner can't proceed.
+    # `offer_alternative`: an honest "no" or "not exactly" plus a candidate path.
+    # `revisit_prior_thread`: pulls a prior conversation thread back into view.
+    # `concede_uncertainty`: explicit "I don't know enough" rather than confabulating.
+    DIALOGUE_MODES = {
+        "probe",
+        "clarify_request",
+        "offer_alternative",
+        "revisit_prior_thread",
+        "concede_uncertainty",
+    }
+
     def plan(
         self,
         *,
@@ -187,6 +201,98 @@ class DiscoursePlanner:
             plan = self._conversation_plan(frame, packet, report)
 
         return self._enrich_plan(plan, frame, packet, darwin, report)
+
+    def concede_uncertainty_plan(
+        self,
+        frame: SemanticFrame,
+        *,
+        question: str = "",
+        reason: str = "",
+    ) -> ResponsePlan:
+        """Explicit 'I don't know enough to answer confidently' plan.
+
+        Used when high-confidence causal claims aren't available and the
+        substrate genuinely cannot ground a confident answer. Honest
+        non-answers are better than confabulations.
+        """
+
+        return ResponsePlan(
+            mode="concede_uncertainty",
+            intent="acknowledge low confidence and avoid confabulation",
+            thesis=(
+                f"I don't have strong grounding for this. {reason}"
+                if reason
+                else "I don't have strong grounding for this."
+            ),
+            answer_points=[],
+            uncertainties=[reason or "grounded evidence is thin"],
+            clarification_questions=[question] if question else [],
+            confidence=0.3,
+            tone="neutral",
+            target_length="short",
+        )
+
+    def probe_plan(
+        self,
+        frame: SemanticFrame,
+        *,
+        question: str,
+        because: str = "",
+    ) -> ResponsePlan:
+        """Darwin asks a back-question because the request is underspecified."""
+
+        return ResponsePlan(
+            mode="probe",
+            intent="ask a clarifying back-question",
+            thesis=(
+                "The request is underspecified along an axis I need to answer "
+                "well; ask before guessing."
+            ),
+            answer_points=[],
+            clarification_questions=[question],
+            uncertainties=[because] if because else [],
+            confidence=0.55,
+            tone="neutral",
+            target_length="short",
+        )
+
+    def offer_alternative_plan(
+        self,
+        frame: SemanticFrame,
+        *,
+        alternative: str,
+        reason: str = "",
+    ) -> ResponsePlan:
+        """An honest 'not exactly that, but consider this' plan."""
+
+        return ResponsePlan(
+            mode="offer_alternative",
+            intent="surface an alternative path",
+            thesis=alternative,
+            answer_points=[alternative],
+            uncertainties=[reason] if reason else [],
+            confidence=0.6,
+            tone="neutral",
+            target_length="medium",
+        )
+
+    def revisit_prior_thread_plan(
+        self,
+        frame: SemanticFrame,
+        *,
+        thread_summary: str,
+    ) -> ResponsePlan:
+        """Pulls a prior conversation thread back into focus."""
+
+        return ResponsePlan(
+            mode="revisit_prior_thread",
+            intent="reconnect to a prior thread the user appears to be returning to",
+            thesis=thread_summary,
+            answer_points=[thread_summary],
+            confidence=0.65,
+            tone="neutral",
+            target_length="medium",
+        )
 
     def _greeting_plan(self, frame: SemanticFrame) -> ResponsePlan:
         # Cognitive layer only labels the intent. The renderer (composer
