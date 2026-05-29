@@ -25,9 +25,15 @@ from darwin.mysterio.memory_tiers import MemoryTierStack
 from darwin.mysterio.meta_gate import MetaGate
 from darwin.mysterio.meta_proposer import MetaProposer
 from darwin.mysterio.narrative import NarrativeThread
+from darwin.mysterio.modalities import (
+    CodeModalityAdapter,
+    WebModalityAdapter,
+)
 from darwin.mysterio.observer_cascade import ObserverCascade
 from darwin.mysterio.observer_modeler import ObserverModeler
 from darwin.mysterio.probes import DivergenceProbe
+from darwin.mysterio.research_loop import LiveResearcher
+from darwin.mysterio.world_synthesis import WorldSynthesizer
 from darwin.mysterio.proprioception import InternalProprioceptionAdapter
 from darwin.mysterio.quarantine import QuarantineQueue
 from darwin.mysterio.snapshot import SnapshotStore
@@ -142,6 +148,20 @@ class DarwinRuntime:
         self.observer_cascade = ObserverCascade(
             self.observer_modeler.world, max_depth=4
         )
+
+        # v9 substrate: open-ended growth.
+        # WorldSynthesizer proposes new SUBSYSTEM specs that the code-gen
+        # pipeline can land as real .py files. LiveResearcher hunts internal
+        # regularities and registers new meta-proposer strategies, subject
+        # to the only structural restriction in v9: instruments are not
+        # rewritable (probe / snapshot / event-stream surfaces).
+        # CodeModalityAdapter watches the source tree for files Darwin
+        # wrote between scans. WebModalityAdapter is constructed inactive
+        # by default; live HTTP is opt-in.
+        self.world_synthesizer = WorldSynthesizer()
+        self.live_researcher = LiveResearcher(meta_proposer=self.meta_proposer)
+        self.code_modality = CodeModalityAdapter()
+        self.web_modality = WebModalityAdapter(active=False)
         # Persist gate swaps as they happen by hooking into the MetaGate.
         if self.store is not None:
             self._wire_gate_history_persistence()

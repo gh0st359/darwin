@@ -595,6 +595,37 @@ class DarwinDaemon:
             for topic, count in sorted(stats.get("subscribers", {}).items()):
                 out.append(f"- {topic}: {count} subscriber(s)")
             return out
+        if head == "/research":
+            researcher = getattr(runtime, "live_researcher", None)
+            if researcher is None:
+                return ["live researcher not active"]
+            summary = researcher.summary()
+            out = [
+                f"findings={summary['findings']} "
+                f"registered_strategies={summary['registered_strategies']}",
+            ]
+            for s in summary["recent_summaries"]:
+                out.append(f"- {s}")
+            return out
+        if head == "/worlds":
+            synth = getattr(runtime, "world_synthesizer", None)
+            if synth is None:
+                return ["world synthesizer not active"]
+            specs = synth.propose(runtime.darwin)
+            if not specs:
+                return ["no new world hypotheses this cycle"]
+            return [f"- {spec.description}" for spec in specs]
+        if head == "/modalities":
+            out = []
+            code = getattr(runtime, "code_modality", None)
+            if code is not None:
+                out.append(f"code: {code.status()}")
+            web = getattr(runtime, "web_modality", None)
+            if web is not None:
+                out.append(f"web: {web.status()}")
+            if not out:
+                return ["no modalities active"]
+            return out
         if head == "/embeddings":
             stats = runtime.embedding_space.stats()
             return [

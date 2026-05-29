@@ -176,12 +176,11 @@ def test_narrative_compose_produces_first_person_prose_and_persists(
 
 
 def test_narrative_search_returns_relevant_chunks(tmp_path: Path) -> None:
-    embedding_space = CausalEmbeddingSpace(dim=16, seed=11)
-    thread = NarrativeThread(embedding_space=embedding_space)
-    thread.compose({"focus": "the room and the curtains and the switch and the daylight"})
+    # No embedding_space → substring fallback. A contiguous substring that
+    # appears only in chunk 2 must surface chunk 2.
+    thread = NarrativeThread()
+    thread.compose({"focus": "the room and the curtains and the switch"})
     thread.compose({"focus": "the autobiography about Darwin and uncertainty"})
-    # Substring path: a contiguous substring that appears in chunk 2 must
-    # surface chunk 2 first.
     matches = thread.search("autobiography")
     assert matches
     assert "autobiography" in matches[0].text
