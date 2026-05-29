@@ -50,6 +50,11 @@ from darwin.universe.correction import (
     detect_correction,
 )
 from darwin.universe.hypothesis import Hypothesis, HypothesisEngine
+from darwin.universe.persistence import (
+    default_universe_path,
+    load_universe,
+    save_universe,
+)
 from darwin.universe.proactive import VolunteeredRemark, choose_volunteer
 from darwin.universe.reflection import (
     Reflection,
@@ -114,7 +119,10 @@ __all__ = [
     "VolunteeredRemark",
     "apply_correction",
     "choose_volunteer",
+    "default_universe_path",
     "detect_correction",
+    "load_universe",
+    "save_universe",
     "QuestionAnalysis",
     "ReasoningStep",
     "ReasoningTrace",

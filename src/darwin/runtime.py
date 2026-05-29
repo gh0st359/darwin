@@ -56,9 +56,12 @@ from darwin.universe import (
     build_answer,
     build_default_universe,
     choose_volunteer,
+    default_universe_path,
     detect_correction,
     is_reflective_prompt,
+    load_universe,
     reflect_on_last_reply,
+    save_universe,
     synthesize,
     synthesize_self_introspection,
 )
@@ -182,7 +185,16 @@ class DarwinRuntime:
         # structural primitives (thing, change, cause, ...); domain
         # knowledge (physics, math, music, ...) is meant to be derived
         # from chat and reflection, not hardcoded.
+        # Persistence: the universe is loaded from a JSON file next to the
+        # sqlite memory path so accumulated knowledge survives restarts.
         self.universe: ConceptUniverse = build_default_universe()
+        self.universe_path = default_universe_path(
+            self.store.path if self.store and hasattr(self.store, "path") else None
+        )
+        try:
+            load_universe(self.universe, self.universe_path)
+        except Exception:
+            pass
         self.grounder = LanguageGrounder(
             self.universe,
             embedding_space=self.embedding_space,
@@ -314,6 +326,13 @@ class DarwinRuntime:
             thread.join(timeout=max(1.0, self.interval * 2.0))
         self._threads.clear()
         self._save_state()
+        # Persist the universe one last time so accumulated knowledge
+        # survives the shutdown.
+        try:
+            if getattr(self, "universe_path", None) is not None:
+                save_universe(self.universe, self.universe_path)
+        except Exception:
+            pass
         self._event("runtime", "Darwin's continuous cognition loops stopped.", loop="main")
 
     def _driver(self, spec: BackgroundLoopSpec) -> None:
@@ -837,6 +856,19 @@ class DarwinRuntime:
 
             if self.store is not None:
                 self.store.record_chat("darwin", response)
+
+            # Persist the universe if it grew this turn.
+            try:
+                grew = bool(
+                    (self.last_fusion_result and self.last_fusion_result.added)
+                    or (self.last_grounding and any(
+                        t.method == "new" for t in self.last_grounding.grounded
+                    ))
+                )
+                if grew and self.universe_path is not None:
+                    save_universe(self.universe, self.universe_path)
+            except Exception:
+                pass
 
             # Record the turn into dialogue memory so future turns can
             # reference what was discussed.
