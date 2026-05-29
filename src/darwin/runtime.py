@@ -57,6 +57,8 @@ from darwin.universe import (
     build_default_universe,
     choose_volunteer,
     detect_correction,
+    is_reflective_prompt,
+    reflect_on_last_reply,
     synthesize,
     synthesize_self_introspection,
 )
@@ -215,6 +217,7 @@ class DarwinRuntime:
         self.last_volunteered = None
         self.last_correction = None
         self.last_learning_probes: list = []
+        self.last_reflection = None
 
         # v9 substrate: open-ended growth.
         # WorldSynthesizer proposes new SUBSYSTEM specs that the code-gen
@@ -650,6 +653,18 @@ class DarwinRuntime:
                 self.last_fusion_result = self.concept_fusion.fuse(message)
                 if self.last_fusion_result and self.last_fusion_result.added:
                     self.grounder.refresh()
+                    # Train the embedding space on the fused concept pairs
+                    # so subsequent fuzzy grounding gains real semantic
+                    # signal (not just random hash-init vectors).
+                    for fused in self.last_fusion_result.added:
+                        try:
+                            self.embedding_space.train_tokens([
+                                f"concept:{fused.source}",
+                                f"concept:{fused.target}",
+                                f"rel:{fused.kind}",
+                            ])
+                        except Exception:
+                            pass
                 self.last_grounding = self.grounder.ground(message)
                 self.deriver.observe_text(message)
                 self.last_question_analysis = analyze_question(
@@ -774,6 +789,7 @@ class DarwinRuntime:
                 self.last_volunteered = None
                 self.last_correction = None
                 self.last_learning_probes = []
+                self.last_reflection = None
 
             user_frame = self.darwin.interpret_language(message, source="user")
             response = self._respond(message, user_frame, user_id=user_id)
@@ -997,6 +1013,39 @@ class DarwinRuntime:
         # (e.g. concede_uncertainty style) are NOT preferred over the v5
         # path — those go through the standard discourse.
         try:
+            # Reflective prompt takes absolute top priority. If the user
+            # asked "why did you say that?", walk back through the prior
+            # turn's actual derivation chain.
+            if is_reflective_prompt(message):
+                prior_turn = None
+                turns = self.dialogue_memory.latest(1)
+                if turns:
+                    prior_turn = turns[0]
+                self.last_reflection = reflect_on_last_reply(
+                    user_text=message,
+                    last_turn=prior_turn,
+                    last_inferences=self.last_inferences,
+                    last_rendered_answer=self.last_rendered_answer,
+                    last_synthesis=self.last_synthesis,
+                    dialogue_summary=self.dialogue_memory.summary(),
+                    last_hypotheses=self.last_hypotheses,
+                )
+                if self.last_reflection and self.last_reflection.text:
+                    draft = self.last_reflection.text
+                    trace.add(
+                        "reflective_walkback",
+                        f"answered via reflective walkback ({self.last_reflection.kind})",
+                        confidence=0.8,
+                    )
+                    trace.final_mode = plan.mode
+                    trace.final_confidence = plan.confidence
+                    self.last_thought_trace = trace
+                    self.last_retrieval = retrieval
+                    self.last_response_plan = plan
+                    self.last_critique = critique
+                    return draft
+            else:
+                self.last_reflection = None
             synthesis = self.last_synthesis
             rendered = self.last_rendered_answer
             # Self-introspection takes top priority when applicable.

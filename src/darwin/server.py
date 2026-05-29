@@ -720,6 +720,16 @@ class DarwinDaemon:
                     f"darwin: {turn.darwin_text[:80]!r}"
                 )
             return out
+        if head == "/reflect":
+            r = getattr(runtime, "last_reflection", None)
+            if r is None:
+                return ["no reflective walkback from last turn"]
+            out = [f"reflection ({r.kind}):", f"  {r.text}"]
+            if r.chain_walked:
+                out.append("chain walked:")
+                for c in r.chain_walked:
+                    out.append(f"  - {c}")
+            return out
         if head == "/correction":
             c = getattr(runtime, "last_correction", None)
             if c is None:
