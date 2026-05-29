@@ -43,6 +43,12 @@ from darwin.universe.answer import (
 )
 from darwin.universe.dialogue_memory import DialogueMemory, DialogueTurn
 from darwin.universe.fusion import ConceptFusion, FusedRelation, FusionResult
+from darwin.universe.active_learning import ActiveLearner, LearningProbe
+from darwin.universe.correction import (
+    Correction,
+    apply_correction,
+    detect_correction,
+)
 from darwin.universe.hypothesis import Hypothesis, HypothesisEngine
 from darwin.universe.proactive import VolunteeredRemark, choose_volunteer
 from darwin.universe.primitive_seed import primitive_names, seed_primitives
@@ -95,10 +101,15 @@ __all__ = [
     "DialogueTurn",
     "FusedRelation",
     "FusionResult",
+    "ActiveLearner",
+    "Correction",
     "Hypothesis",
     "HypothesisEngine",
+    "LearningProbe",
     "VolunteeredRemark",
+    "apply_correction",
     "choose_volunteer",
+    "detect_correction",
     "QuestionAnalysis",
     "ReasoningStep",
     "ReasoningTrace",

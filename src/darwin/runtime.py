@@ -41,6 +41,7 @@ from darwin.operator_model import OperatorModelRegistry
 from darwin.self_modification import ModificationOutcome, SelfModificationEngine
 from darwin.storage import PersistentStore
 from darwin.universe import (
+    ActiveLearner,
     ConceptDeriver,
     ConceptFusion,
     ConceptUniverse,
@@ -51,9 +52,11 @@ from darwin.universe import (
     InferenceEngine,
     LanguageGrounder,
     analyze_question,
+    apply_correction,
     build_answer,
     build_default_universe,
     choose_volunteer,
+    detect_correction,
     synthesize,
     synthesize_self_introspection,
 )
@@ -199,6 +202,7 @@ class DarwinRuntime:
         self.concept_fusion = ConceptFusion(self.universe, bus=self.bus)
         self.dialogue_memory = DialogueMemory(capacity=64)
         self.hypothesis_engine = HypothesisEngine(self.universe)
+        self.active_learner = ActiveLearner(self.universe)
         self.last_reasoning_trace = None
         self.last_grounding = None
         self.last_inferences: list = []
@@ -209,6 +213,8 @@ class DarwinRuntime:
         self.last_synthesis = None
         self.last_hypotheses: list = []
         self.last_volunteered = None
+        self.last_correction = None
+        self.last_learning_probes: list = []
 
         # v9 substrate: open-ended growth.
         # WorldSynthesizer proposes new SUBSYSTEM specs that the code-gen
@@ -621,7 +627,25 @@ class DarwinRuntime:
             # co-occurrence. None of this is required for a reply — every
             # branch is wrapped so a failure here does not break chat.
             try:
-                # Fusion runs FIRST so concepts and relations the user
+                # Correction detection runs BEFORE fusion so a "no, that's
+                # wrong" can refute the prior reply's inferences before any
+                # new edges land.
+                self.last_correction = detect_correction(message)
+                if self.last_correction is not None:
+                    last_turn = self.dialogue_memory.latest(1)
+                    last_inferences = self.last_inferences or []
+                    last_grounded = (
+                        last_turn[0].grounded_concepts if last_turn else []
+                    )
+                    apply_correction(
+                        self.last_correction,
+                        last_grounded_concepts=last_grounded,
+                        last_inferences=last_inferences,
+                        fusion=self.concept_fusion,
+                        hypothesis_engine=self.hypothesis_engine,
+                        universe=self.universe,
+                    )
+                # Fusion runs next so concepts and relations the user
                 # declares are present in the universe before grounding.
                 self.last_fusion_result = self.concept_fusion.fuse(message)
                 if self.last_fusion_result and self.last_fusion_result.added:
@@ -714,6 +738,12 @@ class DarwinRuntime:
                 # Generate hypotheses on every chat turn — keeps Darwin
                 # *ahead* of the operator instead of only reacting.
                 self.last_hypotheses = self.hypothesis_engine.generate()
+                # Build learning probes for any gap that blocked an answer.
+                self.last_learning_probes = self.active_learner.probe(
+                    question_kind=(analysis.kind if analysis else "unknown"),
+                    grounded_concepts=self.last_grounding.concept_names,
+                    inferences=only_inferences,
+                )
                 # Don't re-volunteer the same hypothesis on consecutive turns.
                 recent_keys: list[tuple[str, str, str]] = []
                 for past_turn in self.dialogue_memory.latest(3):
@@ -742,6 +772,8 @@ class DarwinRuntime:
                 self.last_synthesis = None
                 self.last_hypotheses = []
                 self.last_volunteered = None
+                self.last_correction = None
+                self.last_learning_probes = []
 
             user_frame = self.darwin.interpret_language(message, source="user")
             response = self._respond(message, user_frame, user_id=user_id)
@@ -1036,18 +1068,25 @@ class DarwinRuntime:
                         and grounded.concept_names
                         and no_real_inference
                     ):
-                        # Honest non-answer with a curiosity probe.
+                        # Honest non-answer with an active-learning probe
+                        # (best) or curiosity question (fallback).
                         seeds = ", ".join(grounded.concept_names[:3])
-                        curiosity_q = ""
-                        if self.last_curiosity:
-                            curiosity_q = " " + self.last_curiosity[0].question
+                        sub_question = ""
+                        if self.last_learning_probes:
+                            top = self.last_learning_probes[0]
+                            sub_question = (
+                                f" To answer that, I'd need to know: "
+                                f"{top.question}"
+                            )
+                        elif self.last_curiosity:
+                            sub_question = " " + self.last_curiosity[0].question
                         draft = (
                             f"I don't have a confident derivation about {seeds} "
-                            f"from my universe right now.{curiosity_q}"
+                            f"from my universe right now.{sub_question}"
                         ).strip()
                         trace.add(
                             "honest_unknown",
-                            "no derivation; honest non-answer with curiosity probe",
+                            "no derivation; honest non-answer with learning probe",
                             confidence=0.4,
                         )
         except Exception:

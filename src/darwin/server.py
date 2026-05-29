@@ -720,6 +720,25 @@ class DarwinDaemon:
                     f"darwin: {turn.darwin_text[:80]!r}"
                 )
             return out
+        if head == "/correction":
+            c = getattr(runtime, "last_correction", None)
+            if c is None:
+                return ["no correction detected last turn"]
+            out = [f"correction: {c.kind} — {c.notes}"]
+            if c.replacement:
+                out.append(f"  replacement: {c.replacement}")
+            for src, kind, tgt in c.refuted_keys:
+                out.append(f"  refuted: {src} —{kind}→ {tgt}")
+            return out
+        if head == "/learn":
+            probes = getattr(runtime, "last_learning_probes", None) or []
+            if not probes:
+                return ["no active-learning probes from last turn"]
+            out = [f"active-learning probes ({len(probes)}):"]
+            for p in probes:
+                out.append(f"  Q: {p.question} (score={p.score:.2f})")
+                out.append(f"     rationale: {p.rationale}")
+            return out
         if head == "/hypotheses":
             engine = getattr(runtime, "hypothesis_engine", None)
             if engine is None:
