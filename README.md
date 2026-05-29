@@ -64,6 +64,49 @@ just primitive structural concepts + chat):
                                                     [self-introspection]
 ```
 
+Beyond reasoning, Darwin now also has *real-world hands*:
+
+12. **Sandboxed real-world tools.** Six adapters (filesystem, terminal,
+    Python execution, web fetch, git, sqlite) live under
+    `src/darwin/tools/`. Each is bounded (timeouts, byte caps, deny-
+    lists, sandbox roots) and dispatched as v5 Actions so the planner
+    can choose them exactly as it chooses any other action.
+13. **Chat→tool intent routing.** "list the files in .", "read X",
+    "run echo hello", "fetch https://...", a code-fenced Python block,
+    "git status", "show recent commits", "select * from notes" — the
+    intent router recognizes the pattern, dispatches the right tool,
+    and weaves the result into the reply ("I used the filesystem tool
+    (fs_list). Result: ...").
+14. **Long-running autonomous tasks.** AutonomousRunner drives goal-
+    directed sessions against the tool world with time + step budgets
+    and a structured success predicate.
+15. **Derived epistemic categorization.** Belief categories
+    (WORLD_KNOWLEDGE, OPERATIONAL, SELF_KNOWLEDGE, HYPOTHESIS,
+    STABLE_FACT, TEMPORARY, SCHEDULER_ARTIFACT) are *derived* from
+    observable signals (provenance, confidence, history, subject), not
+    hardcoded. `/beliefs` suppresses bookkeeping noise by default;
+    `/beliefs all` shows everything. The derivation itself is
+    re-derivable as Darwin's mechanisms (fusion, derivation,
+    hypothesis engine, correction detector) reinforce or refute the
+    underlying patterns.
+16. **Versioned evolution safeguards.** Every accepted self-
+    modification lands in a sequential MutationLedger with parent
+    versioning + content hash. RollbackChain restores prior
+    MindSnapshots by version. MutationScorer ranks by composite
+    score (improvement + retention + downstream impact). RecoveryMonitor
+    advises rollbacks when composite health drops; the operator can
+    opt in to auto-rollback. None of this restricts Darwin's ability
+    to evolve.
+17. **Longitudinal benchmarks.** A 12-task suite covering all seven
+    categories (coding, memory, learning, adaptation, planning,
+    reasoning, task_completion) lets the operator empirically compare
+    an older Darwin to a newer one. Scorecards persist to disk so
+    today's run lives next to yesterday's for direct comparison.
+18. **Test isolation.** Every test runs under an autouse fixture that
+    redirects all default paths to a per-test temp directory via
+    `DARWIN_DATA_DIR`. No test can read or write to the operator's
+    production memory, universe, or snapshots.
+
 Eleven capabilities Darwin has and the LLM you know doesn't:
 
 1. **Build a knowledge graph from natural-language assertions.** "A neuron
@@ -244,7 +287,7 @@ you> /explain dog animal
 Every instrument is reachable from any chat client, the brain's local
 prompt, or `darwin inspect`.
 
-### Universe instruments (new in this branch)
+### Universe instruments
 
 ```text
 /universe                 concept / relation / domain counts + per-domain sizes
@@ -263,6 +306,40 @@ prompt, or `darwin inspect`.
 /fusion                   recent fused (concept → kind → concept) triples
 /dialogue                 turn history + most-discussed concepts
 /synthesis                last multi-fact synthesis paragraph
+/categorize summary       derived epistemic-category counts + drift
+/categorize concept <name> derived category set for one concept
+```
+
+### Real-world tools
+
+```text
+/tools                    list registered tools and their actions
+/tool <action> k=v ...    run a tool action immediately
+/autonomous               recent autonomous-runner task history
+```
+
+Tools dispatch through the v5 planner as Actions, so successful tool
+calls feed back into the causal model and Darwin's planning gets better
+at choosing tool actions over the brain's lifetime. The chat path's
+intent router routes natural-language requests like "list the files in
+.", "read note.txt", "run echo hi", "fetch https://...", "git status",
+and "select * from notes" to the appropriate tool automatically.
+
+### Evolution safeguards
+
+```text
+/evolution                ledger summary + last 10 versioned mutations
+/rollback-chain V | step N  restore the state from before mutation V
+/scores                   top-K mutations by composite score
+/recovery                 advisory rollback recommendations
+```
+
+### Benchmarks
+
+```bash
+darwin bench run --label baseline
+darwin bench list
+darwin bench compare --earlier old.json --later new.json
 ```
 
 ### Mysterio instruments
@@ -292,6 +369,11 @@ src/darwin/
   __init__.py
   __main__.py
   cli.py                  darwin brain / chat / connect / inspect / live / run
+
+  # configuration + cross-cutting
+  paths.py                centralized DARWIN_DATA_DIR path resolution
+  epistemics.py           derived belief categories + monitor + filter
+  evolution.py            mutation ledger / rollback chain / scorer / recovery monitor
 
   # v5 base substrate
   agent.py                Darwin orchestration (now with TrackRegistry)
@@ -377,13 +459,41 @@ src/darwin/
     reflection.py         walkback through prior reply's derivation
     persistence.py        atomic JSON save/load of the universe
     world.py              universe presented as a World protocol implementation
+
+  # real-world tool harness
+  tools/
+    base.py               Tool ABC + ToolResult + SandboxEscape + resolve_sandboxed
+    filesystem.py         sandboxed read/write/list/remove/stat
+    terminal.py           shell with timeout + deny-list
+    code_execution.py     Python in subprocess sandbox
+    web.py                http/https fetch + HTML→text (stdlib only)
+    git.py                read-only git inspection
+    database.py           sqlite read+write in sandbox
+    registry.py           central tool registry + dispatch
+    world.py              ToolWorld — registry as a World implementation
+    autonomous.py         AutonomousRunner / AutonomousTask / AutonomousStep
+    intent.py             chat→tool intent router (rule-based)
+
+  # benchmarking
+  bench/
+    framework.py          BenchmarkTask / Suite / Runner / ScoreCard / Comparison
+    suites.py             12-task default suite covering 7 categories
 ```
 
 ## Tests
 
 ```bash
-python -m pytest tests/ -q   # 364 tests, ~30s
+python -m pytest tests/ -q   # 489 tests, ~14s
 ```
+
+Tests run under an autouse isolation fixture (`tests/conftest.py`) that
+redirects every default Darwin path to a per-test temp directory via
+`DARWIN_DATA_DIR`. Production memory, the universe JSON, the runtime
+state file, the snapshot store, training logs, and tool sandbox roots
+are all scoped to the test. After every test the fixture also scans the
+working directory for any legacy Darwin artifact that would indicate a
+leak; if one is found, the test fails loudly and the leaked file is
+cleaned up so the next test starts uncontaminated.
 
 ```text
 tests/
@@ -459,9 +569,21 @@ darwin inspect "<slash-command>"        # terminal 3: one-shot instrument
   --port 9870
   --timeout 10.0
 
+darwin bench run [--label X] [--out F]  # score a fresh runtime
+darwin bench list [--dir D]             # enumerate saved scorecards
+darwin bench compare --earlier A.json --later B.json
+
 darwin run --steps 40 --seed 7          # batch run in the legacy room sim
 darwin live                             # single-terminal mind + chat (v5)
 darwin export-training --min-quality 0.7
+```
+
+### Environment variables
+
+```text
+DARWIN_DATA_DIR    root directory for every persistent artifact (sqlite memory,
+                   universe JSON, runtime state, snapshots, training logs,
+                   sandbox roots, bench scorecards). Defaults to CWD.
 ```
 
 ## Non-negotiables
@@ -490,6 +612,22 @@ darwin export-training --min-quality 0.7
 - **Knowledge accumulates.** The universe persists atomically after
   every growth turn. Session N inherits everything Sessions 1…N-1
   learned.
+- **Real-world tools are sandboxed.** Every adapter (filesystem,
+  terminal, code execution, web, git, sqlite) is bounded by timeouts,
+  byte caps, deny-lists, and sandbox roots. No tool action can escape
+  the sandbox or take down the cognition loop on its own.
+- **Evolution is observable and reversible.** Every accepted
+  modification lands in a versioned ledger; the rollback chain can
+  restore prior MindSnapshots without destructive history edits. The
+  recovery monitor's advice is advisory by default — Darwin's
+  ability to evolve is not restricted, only made transparent.
+- **Belief categorization is derived, not hardcoded.** Categories
+  inform surfacing (which beliefs to show by default), not what
+  Darwin can think about. `/beliefs all` always works.
+- **Tests never contaminate production state.** `DARWIN_DATA_DIR`
+  routes every default path through one env var; the test isolation
+  fixture (autouse, no opt-out) redirects it to a per-test temp
+  directory and fails any test that leaks.
 
 ## What's next
 
