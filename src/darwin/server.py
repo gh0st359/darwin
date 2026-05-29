@@ -805,6 +805,83 @@ class DarwinDaemon:
                     f"darwin: {turn.darwin_text[:80]!r}"
                 )
             return out
+        if head == "/evolution":
+            ledger = getattr(runtime, "mutation_ledger", None)
+            if ledger is None:
+                return ["mutation ledger not active"]
+            summary = ledger.summary()
+            out = [
+                f"mutations: total={summary['total']} active={summary['active']} "
+                f"rolled_back={summary['rolled_back']} rejected={summary['rejected']} "
+                f"rollback_records={summary['rollback_records']}",
+                "recent:",
+            ]
+            for record in ledger.latest(10):
+                tag = (
+                    "ACCEPTED" if record.accepted and record.rolled_back_at is None
+                    else ("ROLLED_BACK" if record.rolled_back_at is not None
+                          else "REJECTED")
+                )
+                out.append(
+                    f"  v{record.version} [{tag}] {record.kind} "
+                    f"gain={record.improvement:.4f}: {record.description[:80]}"
+                )
+            return out
+        if head == "/rollback-chain":
+            ledger = getattr(runtime, "mutation_ledger", None)
+            chain = getattr(runtime, "rollback_chain", None)
+            if ledger is None or chain is None:
+                return ["rollback chain not active"]
+            if len(parts) < 2:
+                return [
+                    "usage: /rollback-chain <version> | /rollback-chain step <n>",
+                ]
+            if parts[1].lower() == "step":
+                steps = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else 1
+                result = chain.step_back(n=steps, reason="operator step_back")
+            else:
+                if not parts[1].isdigit():
+                    return [f"version must be a number, got {parts[1]!r}"]
+                result = chain.rollback_to(int(parts[1]), reason="operator rollback")
+            if not result.success:
+                return [f"rollback failed: {result.notes}"]
+            return [
+                f"rolled back to version {result.rolled_back_to_version} "
+                f"(new ledger entry v{result.new_version}); "
+                f"restored snapshot {result.restored_snapshot_id[:13]}",
+            ]
+        if head == "/scores":
+            scorer = getattr(runtime, "mutation_scorer", None)
+            if scorer is None:
+                return ["mutation scorer not active"]
+            ranked = scorer.ranked(limit=10)
+            if not ranked:
+                return ["no scored mutations yet"]
+            out = ["top-scored mutations:"]
+            for score in ranked:
+                out.append(
+                    f"  v{score.version} composite={score.composite:.3f} "
+                    f"improvement={score.improvement:.3f} "
+                    f"retention={score.retention:.1f} "
+                    f"downstream={score.downstream_impact}"
+                )
+            return out
+        if head == "/recovery":
+            monitor = getattr(runtime, "recovery_monitor", None)
+            if monitor is None:
+                return ["recovery monitor not active"]
+            recs = monitor.recommendations()
+            if not recs:
+                return ["no recovery recommendations (substrate health is stable)"]
+            out = [f"recovery recommendations ({len(recs)}):"]
+            for rec in recs[-6:]:
+                out.append(
+                    f"  target=v{rec.target_version} "
+                    f"confidence={rec.confidence:.2f} "
+                    f"health_drop={rec.health_drop:.3f}"
+                )
+                out.append(f"    rationale: {rec.rationale}")
+            return out
         if head == "/tools":
             registry = getattr(runtime, "tool_registry", None)
             if registry is None:

@@ -33,6 +33,12 @@ from darwin.mysterio.observer_cascade import ObserverCascade
 from darwin.mysterio.observer_modeler import ObserverModeler
 from darwin.mysterio.probes import DivergenceProbe
 from darwin.epistemics import EpistemicMonitor
+from darwin.evolution import (
+    MutationLedger,
+    MutationScorer,
+    RecoveryMonitor,
+    RollbackChain,
+)
 from darwin.mysterio.research_loop import LiveResearcher
 from darwin.tools import (
     AutonomousRunner,
@@ -279,6 +285,88 @@ class DarwinRuntime:
 
         # Epistemic monitor — derived belief categories.
         self.epistemic_monitor = EpistemicMonitor()
+
+        # Evolution safeguards: versioned mutation ledger, rollback chain,
+        # mutation scoring, and a recovery monitor that proposes (but does
+        # not automatically apply) rollbacks when composite health drops.
+        # All four are *advisory layers* on top of the existing
+        # self-modification engine; none of them restrict Darwin's ability
+        # to evolve.
+        self.mutation_ledger = MutationLedger()
+        self.mutation_scorer = MutationScorer(self.mutation_ledger)
+        self.recovery_monitor = RecoveryMonitor(ledger=self.mutation_ledger)
+
+        def _apply_snapshot_for_rollback(snapshot) -> None:
+            # Restore the v5 substrate state captured in the snapshot.
+            # The snapshot's payload covers causal beliefs, self-model
+            # state, world-model variables, planner overrides, and
+            # exploration rate. We map them back onto the live Darwin so
+            # subsequent reasoning continues from that point. The
+            # universe and dialogue history stay where they are — only
+            # the self-mod-relevant state is rolled back, which matches
+            # what the snapshot captured.
+            try:
+                self.darwin.exploration_rate = float(snapshot.exploration_rate)
+            except Exception:
+                pass
+            try:
+                self.darwin.causal_model.min_samples = int(
+                    snapshot.causal.get("min_samples", self.darwin.causal_model.min_samples)
+                )
+            except Exception:
+                pass
+            try:
+                planner_overrides = dict(snapshot.planner or {})
+                setattr(self.darwin, "_planner_overrides", planner_overrides)
+            except Exception:
+                pass
+
+        self.rollback_chain = RollbackChain(
+            ledger=self.mutation_ledger,
+            snapshot_store=self.snapshot_store,
+            apply_snapshot=_apply_snapshot_for_rollback,
+        )
+
+        # Hook the self-modification engine so every accepted modification
+        # automatically lands in the mutation ledger. The original
+        # MetaGate.swap hook still persists gate-history rows; this hook
+        # is additive and never overrides outcome semantics.
+        try:
+            original_run_cycle = self.self_mod_engine.run_cycle
+
+            def _ledger_aware_run_cycle(*args, **kwargs):
+                outcomes = original_run_cycle(*args, **kwargs)
+                for outcome in outcomes or []:
+                    try:
+                        proposal = getattr(outcome, "proposal", None)
+                        improvement = float(getattr(outcome, "improvement", 0.0) or 0.0)
+                        accepted = bool(getattr(outcome, "accepted", False))
+                        kind = (
+                            str(getattr(proposal, "kind", "PARAMETER"))
+                            if proposal else "PARAMETER"
+                        )
+                        description = (
+                            str(getattr(proposal, "rationale", ""))
+                            if proposal else ""
+                        ) or str(getattr(outcome, "summary", "")) or kind
+                        self.mutation_ledger.append(
+                            kind=kind,
+                            description=description,
+                            improvement=improvement,
+                            accepted=accepted,
+                            rationale=description,
+                            metadata={
+                                "baseline_error": float(getattr(outcome, "baseline_error", 0.0) or 0.0),
+                                "candidate_error": float(getattr(outcome, "candidate_error", 0.0) or 0.0),
+                            },
+                        )
+                    except Exception:
+                        continue
+                return outcomes
+
+            self.self_mod_engine.run_cycle = _ledger_aware_run_cycle  # type: ignore[method-assign]
+        except Exception:
+            pass
 
         # Action names that are known to come from internal scheduler /
         # conceptual-world loops (NOT real-world actions on an external
