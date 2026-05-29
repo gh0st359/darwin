@@ -335,15 +335,100 @@ class DarwinDaemon:
                 lines.append(f"storage={runtime.store.counts()}")
             return lines
         if head == "/beliefs":
-            beliefs = runtime.darwin.causal_model.beliefs(limit=15)
-            if not beliefs:
+            # By default, suppress operational/scheduler-bookkeeping noise
+            # so the reply lists *meaningful* causal regularities. Pass an
+            # explicit category to include it (or "all" to bypass the
+            # filter entirely).
+            from darwin.epistemics import (
+                OPERATIONAL,
+                SCHEDULER_ARTIFACT,
+                STABLE_FACT,
+                categorize_causal_belief,
+            )
+
+            scheduler_actions = getattr(runtime, "_scheduler_action_names", set())
+            raw = runtime.darwin.causal_model.beliefs(limit=80)
+            if not raw:
                 return ["No grounded causal beliefs yet."]
-            return [
-                (
+            requested = parts[1].lower() if len(parts) >= 2 else ""
+            include_all = requested in ("all", "*")
+            include_categories: set[str] = set()
+            exclude_categories: set[str] = set()
+            if include_all:
+                pass
+            elif requested in ("operational", "scheduler", "scheduler_artifact"):
+                include_categories = {OPERATIONAL, SCHEDULER_ARTIFACT}
+            elif requested in ("stable", "facts", "stable_fact"):
+                include_categories = {STABLE_FACT}
+            elif requested:
+                include_categories = {requested}
+            else:
+                exclude_categories = {SCHEDULER_ARTIFACT}
+            filtered: list[tuple[Any, set[str]]] = []
+            for b in raw:
+                cats = categorize_causal_belief(b, scheduler_actions=scheduler_actions)
+                if exclude_categories and cats & exclude_categories:
+                    continue
+                if include_categories and not (cats & include_categories):
+                    continue
+                filtered.append((b, cats))
+                if len(filtered) >= 15:
+                    break
+            if not filtered:
+                return [
+                    f"No causal beliefs match the requested filter "
+                    f"({requested or 'default'}). "
+                    f"Use '/beliefs all' to see every belief including "
+                    f"internal bookkeeping."
+                ]
+            out: list[str] = []
+            for b, cats in filtered:
+                tag = ",".join(sorted(cats))
+                out.append(
                     f"- if {b.condition}: {b.action} -> {b.variable} {b.effect} "
-                    f"conf={b.confidence:.2f} n={b.samples}"
+                    f"conf={b.confidence:.2f} n={b.samples} [{tag}]"
                 )
-                for b in beliefs
+            return out
+        if head == "/categorize":
+            from darwin.epistemics import (
+                categorize_causal_belief,
+                categorize_concept,
+                categorize_relation,
+            )
+
+            scheduler_actions = getattr(runtime, "_scheduler_action_names", set())
+            target_kind = parts[1].lower() if len(parts) >= 2 else "summary"
+            if target_kind == "summary":
+                monitor = getattr(runtime, "epistemic_monitor", None)
+                if monitor is None:
+                    return ["epistemic monitor not active"]
+                snap = monitor.scan(
+                    causal_beliefs=runtime.darwin.causal_model.beliefs(limit=200),
+                    concepts=runtime.universe.all_concepts() if hasattr(runtime, "universe") else [],
+                    relations=runtime.universe.relations() if hasattr(runtime, "universe") else [],
+                    scheduler_actions=scheduler_actions,
+                )
+                out = [
+                    f"epistemic category counts (sample={monitor.sample_size}):"
+                ]
+                for cat, count in sorted(snap.items(), key=lambda kv: -kv[1]):
+                    out.append(f"  {cat}: {count}")
+                drift = monitor.drift()
+                if drift:
+                    out.append("drift since previous scan:")
+                    for cat, d in sorted(drift.items(), key=lambda kv: abs(kv[1]), reverse=True):
+                        sign = "+" if d >= 0 else ""
+                        out.append(f"  {cat}: {sign}{d:.1%}")
+                return out
+            if target_kind == "concept" and len(parts) >= 3:
+                name = parts[2]
+                c = runtime.universe.get(name) if hasattr(runtime, "universe") else None
+                if c is None:
+                    return [f"no concept named {name!r}"]
+                cats = categorize_concept(c)
+                return [f"{name}: {sorted(cats)}"]
+            return [
+                "usage: /categorize summary | /categorize concept <name>",
             ]
         if head == "/concepts":
             return [

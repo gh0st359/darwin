@@ -32,6 +32,7 @@ from darwin.mysterio.modalities import (
 from darwin.mysterio.observer_cascade import ObserverCascade
 from darwin.mysterio.observer_modeler import ObserverModeler
 from darwin.mysterio.probes import DivergenceProbe
+from darwin.epistemics import EpistemicMonitor
 from darwin.mysterio.research_loop import LiveResearcher
 from darwin.tools import (
     AutonomousRunner,
@@ -275,6 +276,24 @@ class DarwinRuntime:
         self.tool_registry.register(DatabaseTool(sandbox_root))
         self.tool_world = ToolWorld(self.tool_registry)
         self.autonomous_runner = AutonomousRunner(self.tool_world)
+
+        # Epistemic monitor — derived belief categories.
+        self.epistemic_monitor = EpistemicMonitor()
+
+        # Action names that are known to come from internal scheduler /
+        # conceptual-world loops (NOT real-world actions on an external
+        # adapter), used to flag derived causal beliefs as
+        # SCHEDULER_ARTIFACT. Only the v7 proprioceptive actions and the
+        # ConceptualWorld substrate-introspection actions seed this set;
+        # actions exposed by tool adapters or by world adapters that act
+        # on real external systems are explicitly NOT included so
+        # categorization doesn't suppress meaningful real-world beliefs.
+        self._scheduler_action_names: set[str] = {
+            "observe_self", "forecast_self", "probe_uncertainty", "model_observer",
+            "explore_concept", "compose_concepts", "generalize_concept",
+            "specialize_concept", "analogize_concept", "reflect_concept",
+            "derive_concepts", "wander_universe",
+        }
         # Persist gate swaps as they happen by hooking into the MetaGate.
         if self.store is not None:
             self._wire_gate_history_persistence()
