@@ -67,6 +67,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     brain_parser.add_argument("--dlm-model", default="gemma3:270m")
     brain_parser.add_argument("--quiet", action="store_true", help="Suppress local event printing.")
+    brain_parser.add_argument(
+        "--world",
+        choices=["conceptual", "room"],
+        default="conceptual",
+        help=(
+            "World Darwin lives in. 'conceptual' (default) is Darwin's own "
+            "concept universe; 'room' is the legacy v5 AdaptiveRoomWorld."
+        ),
+    )
+    brain_parser.add_argument(
+        "--demo-seed",
+        action="store_true",
+        help=(
+            "Opt in to the hardcoded demo concept seed (physics, math, music, "
+            "...). Off by default — the universe starts with structural "
+            "primitives and grows from chat + derivation."
+        ),
+    )
 
     connect_parser = subparsers.add_parser(
         "connect",
@@ -156,6 +174,8 @@ def main(argv: list[str] | None = None) -> int:
             args.dlm_backend,
             args.dlm_model,
             not args.quiet,
+            world_kind=args.world,
+            demo_seed=args.demo_seed,
         )
     if args.command == "connect" or args.command == "chat":
         return connect(
@@ -221,18 +241,46 @@ def brain(
     dlm_backend: str,
     dlm_model: str,
     print_events: bool,
+    *,
+    world_kind: str = "conceptual",
+    demo_seed: bool = False,
 ) -> int:
     """Run Darwin as a 24/7 daemon. No stdin loop; clients attach over TCP."""
 
-    world = AdaptiveRoomWorld(seed=seed)
-    adapter = RoomSimulationAdapter(world)
     store = PersistentStore(memory_path)
-    actions = ensure_chat_action(adapter.possible_actions())
-    goal = Goal(
-        desired={"room_bright": True, "fuse_intact": True},
-        weights={"room_bright": 2.0, "fuse_intact": 1.0},
-        exploration_weight=0.35,
-    )
+    if world_kind == "room":
+        room = AdaptiveRoomWorld(seed=seed)
+        adapter = RoomSimulationAdapter(room)
+        actions = ensure_chat_action(adapter.possible_actions())
+        goal = Goal(
+            desired={"room_bright": True, "fuse_intact": True},
+            weights={"room_bright": 2.0, "fuse_intact": 1.0},
+            exploration_weight=0.35,
+        )
+    else:
+        # Default: Darwin lives in its own concept universe.
+        from darwin.universe import (
+            ConceptDeriver,
+            ConceptualWorld,
+            build_default_universe,
+        )
+
+        universe = build_default_universe()
+        if demo_seed:
+            from darwin.universe.demo_universe import demo_seed_universe
+
+            demo_seed_universe(universe)
+        deriver = ConceptDeriver(universe)
+        adapter = ConceptualWorld(universe, deriver=deriver, seed=seed)
+        actions = ensure_chat_action(adapter.possible_actions())
+        goal = Goal(
+            desired={
+                "neighbor_domains": 4,
+                "concept_count": 50,
+            },
+            weights={"neighbor_domains": 2.0, "concept_count": 1.0},
+            exploration_weight=0.40,
+        )
     darwin = Darwin.from_store(
         actions=actions, store=store, seed=seed, exploration_rate=exploration,
     )

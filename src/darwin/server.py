@@ -599,6 +599,76 @@ class DarwinDaemon:
             for path, sha in sorted(manifest.items()):
                 out.append(f"- {path} sha={sha[:12]}")
             return out
+        if head == "/universe":
+            universe = getattr(runtime, "universe", None)
+            if universe is None:
+                return ["concept universe not active"]
+            summary = universe.summary()
+            out = [
+                f"concepts={summary['concepts']} "
+                f"relations={summary['relations']} "
+                f"domains={summary['domains']} "
+                f"growth_events={summary['growth_events']}",
+            ]
+            for domain_name, count in sorted(summary["domain_sizes"].items()):
+                out.append(f"- {domain_name}: {count}")
+            return out
+        if head == "/concept":
+            universe = getattr(runtime, "universe", None)
+            if universe is None or len(parts) < 2:
+                return ["usage: /concept <name>"]
+            name = " ".join(parts[1:])
+            concept = universe.get(name)
+            if concept is None:
+                return [f"no concept named {name!r}"]
+            neighbors = universe.neighbors(concept.name)
+            out = [
+                f"{concept.short_label()}: {concept.definition or '(no definition)'}",
+                f"depth={concept.depth} salience={concept.salience:.2f} "
+                f"visits={concept.visits} neighbors={len(neighbors)}",
+            ]
+            for rel in neighbors[:12]:
+                out.append(f"  -{rel.kind}-> {rel.target}")
+            return out
+        if head == "/reason":
+            trace = getattr(runtime, "last_reasoning_trace", None)
+            if trace is None:
+                return ["no reasoning trace yet (chat first)"]
+            out = [
+                f"query: {trace.query!r}",
+                f"seeds: {trace.seed_concepts}",
+                f"coverage: {trace.coverage:.2f}",
+                f"steps: {len(trace.steps)}",
+            ]
+            for step in trace.steps:
+                out.append(f"  [{step.kind}] {step.summary}")
+            return out
+        if head == "/ground":
+            grounding = getattr(runtime, "last_grounding", None)
+            if grounding is None:
+                return ["no grounding yet (chat first)"]
+            out = [f"text: {grounding.text!r}", f"concepts: {grounding.concept_names}"]
+            for term in grounding.grounded:
+                out.append(
+                    f"  {term.surface!r} -> {term.concept_name} "
+                    f"[{term.domain}] via {term.method} ({term.confidence:.2f})"
+                )
+            if grounding.unrecognized:
+                out.append(f"unrecognized: {grounding.unrecognized}")
+            return out
+        if head == "/derive":
+            deriver = getattr(runtime, "deriver", None)
+            if deriver is None:
+                return ["concept deriver not active"]
+            darwin = getattr(runtime, "darwin", None)
+            accepted = deriver.derive(darwin=darwin)
+            out = [
+                f"deriver summary: {deriver.summary()}",
+                f"this pass accepted={len(accepted)}",
+            ]
+            for c in accepted[:12]:
+                out.append(f"  + {c.name} [{c.pathway}] conf={c.confidence:.2f}")
+            return out
         if head == "/strategic":
             manager = getattr(runtime, "strategic_threads", None)
             if manager is None:

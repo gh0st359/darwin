@@ -40,6 +40,13 @@ from darwin.mysterio.snapshot import SnapshotStore
 from darwin.operator_model import OperatorModelRegistry
 from darwin.self_modification import ModificationOutcome, SelfModificationEngine
 from darwin.storage import PersistentStore
+from darwin.universe import (
+    ConceptDeriver,
+    ConceptUniverse,
+    ConceptualReasoner,
+    LanguageGrounder,
+    build_default_universe,
+)
 from darwin.thought import ThoughtTrace
 from darwin.training_data import TrainingDataCollector
 from darwin.types import Action, Goal, Transition
@@ -154,6 +161,31 @@ class DarwinRuntime:
         # (distinct from v7 ObserverModeler, which tracks attention and
         # intervention probability — this tracks how the user *converses*).
         self.operator_models = OperatorModelRegistry()
+
+        # vX universe substrate: Darwin's internal concept graph + reasoner
+        # + language grounder + derivation engine. Seeded only with
+        # structural primitives (thing, change, cause, ...); domain
+        # knowledge (physics, math, music, ...) is meant to be derived
+        # from chat and reflection, not hardcoded.
+        self.universe: ConceptUniverse = build_default_universe()
+        self.grounder = LanguageGrounder(
+            self.universe,
+            embedding_space=self.embedding_space,
+            new_domain="general",
+            auto_register=True,
+        )
+        self.reasoner = ConceptualReasoner(
+            self.universe,
+            embedding_space=self.embedding_space,
+            bus=self.bus,
+        )
+        self.deriver = ConceptDeriver(
+            self.universe,
+            embedding_space=self.embedding_space,
+            bus=self.bus,
+        )
+        self.last_reasoning_trace = None
+        self.last_grounding = None
 
         # v9 substrate: open-ended growth.
         # WorldSynthesizer proposes new SUBSYSTEM specs that the code-gen
@@ -560,6 +592,23 @@ class DarwinRuntime:
                 self.operator_models.get(user_id).observe(message)
             except Exception:
                 pass
+            # Universe substrate: ground the user's words to concepts in
+            # Darwin's universe, run the conceptual reasoner, and feed the
+            # text to the deriver so new concepts can form from repeated
+            # co-occurrence. None of this is required for a reply — every
+            # branch is wrapped so a failure here does not break chat.
+            try:
+                self.last_grounding = self.grounder.ground(message)
+                self.deriver.observe_text(message)
+                self.last_reasoning_trace = self.reasoner.think(
+                    query=message,
+                    seeds=self.last_grounding.concept_names,
+                    max_hops=2,
+                    bridge_limit=6,
+                )
+            except Exception:
+                self.last_grounding = None
+                self.last_reasoning_trace = None
 
             user_frame = self.darwin.interpret_language(message, source="user")
             response = self._respond(message, user_frame, user_id=user_id)
@@ -660,6 +709,24 @@ class DarwinRuntime:
             preferred = self.operator_models.get(user_id).preferred_length(plan.mode)
             if preferred in {"short", "medium", "long"}:
                 plan.target_length = preferred
+        except Exception:
+            pass
+        # Inject the reasoning-trace's answer points so the response is
+        # grounded in Darwin's actual conceptual neighborhood, not just
+        # the v5 causal beliefs. Use append (not replace) so the existing
+        # belief-claim path still surfaces; the realizer can prioritize.
+        try:
+            reasoning_trace = self.last_reasoning_trace
+            if reasoning_trace is not None and reasoning_trace.suggested_answer_points:
+                existing = list(plan.answer_points or [])
+                for point in reasoning_trace.suggested_answer_points:
+                    if point not in existing:
+                        existing.append(point)
+                plan.answer_points = existing[:8]
+                if reasoning_trace.coverage > 0.0 and plan.confidence < 0.55:
+                    plan.confidence = min(
+                        0.85, plan.confidence + 0.2 * reasoning_trace.coverage
+                    )
         except Exception:
             pass
         trace.add(
