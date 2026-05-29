@@ -20,9 +20,12 @@ from darwin.mysterio.bus import BusTopic, CognitionBus
 from darwin.mysterio.code_gen import CodeGenerator, ModuleLoader
 from darwin.mysterio.embeddings import CausalEmbeddingSpace
 from darwin.mysterio.interior_simulator import InteriorSimulator
+from darwin.mysterio.long_horizon import StrategicThreadManager
+from darwin.mysterio.memory_tiers import MemoryTierStack
 from darwin.mysterio.meta_gate import MetaGate
 from darwin.mysterio.meta_proposer import MetaProposer
 from darwin.mysterio.narrative import NarrativeThread
+from darwin.mysterio.observer_cascade import ObserverCascade
 from darwin.mysterio.observer_modeler import ObserverModeler
 from darwin.mysterio.probes import DivergenceProbe
 from darwin.mysterio.proprioception import InternalProprioceptionAdapter
@@ -128,6 +131,17 @@ class DarwinRuntime:
         self.observer_modeler = ObserverModeler()
         self.last_interior_rollout = None
         self.last_narrative_chunk = None
+
+        # v8 substrate: distributed cognition.
+        # Five-tier memory stack for episodic -> semantic -> conceptual ->
+        # archetypal -> narrative consolidation. StrategicThreadManager keeps
+        # multi-day goals coherent. ObserverCascade builds depth-4 theory of
+        # mind on top of the v7 ObserverWorld.
+        self.memory_tiers = MemoryTierStack()
+        self.strategic_threads = StrategicThreadManager()
+        self.observer_cascade = ObserverCascade(
+            self.observer_modeler.world, max_depth=4
+        )
         # Persist gate swaps as they happen by hooking into the MetaGate.
         if self.store is not None:
             self._wire_gate_history_persistence()
@@ -463,6 +477,8 @@ class DarwinRuntime:
     def _loop_observer(self) -> RuntimeEvent | None:
         with self._lock:
             step = self.observer_modeler.step()
+            cascade_step = self.observer_cascade.step()
+            step["cascade"] = cascade_step
             try:
                 self.bus.publish(
                     BusTopic.OBSERVER_EVENTS,
@@ -475,7 +491,8 @@ class DarwinRuntime:
             op = step.get("operator", {})
             content = (
                 f"observer: attention={op.get('attention_level', 0.0):.2f} "
-                f"intervention_forecast={forecast:.2f}"
+                f"intervention_forecast={forecast:.2f} "
+                f"tom_depth={self.observer_cascade.max_depth}"
             )
             return self._event(
                 "observer",
@@ -551,6 +568,10 @@ class DarwinRuntime:
                     },
                     source="embedding_trainer",
                 )
+            except Exception:
+                pass
+            try:
+                self.memory_tiers.ingest_transition(transition, track="grounded")
             except Exception:
                 pass
 
