@@ -42,14 +42,18 @@ from darwin.self_modification import ModificationOutcome, SelfModificationEngine
 from darwin.storage import PersistentStore
 from darwin.universe import (
     ConceptDeriver,
+    ConceptFusion,
     ConceptUniverse,
     ConceptualReasoner,
     CuriosityEngine,
+    DialogueMemory,
     InferenceEngine,
     LanguageGrounder,
     analyze_question,
     build_answer,
     build_default_universe,
+    synthesize,
+    synthesize_self_introspection,
 )
 from darwin.thought import ThoughtTrace
 from darwin.training_data import TrainingDataCollector
@@ -190,12 +194,16 @@ class DarwinRuntime:
         )
         self.inference_engine = InferenceEngine(self.universe)
         self.curiosity_engine = CuriosityEngine(self.universe)
+        self.concept_fusion = ConceptFusion(self.universe, bus=self.bus)
+        self.dialogue_memory = DialogueMemory(capacity=64)
         self.last_reasoning_trace = None
         self.last_grounding = None
         self.last_inferences: list = []
         self.last_curiosity: list = []
         self.last_question_analysis = None
         self.last_rendered_answer = None
+        self.last_fusion_result = None
+        self.last_synthesis = None
 
         # v9 substrate: open-ended growth.
         # WorldSynthesizer proposes new SUBSYSTEM specs that the code-gen
@@ -608,6 +616,11 @@ class DarwinRuntime:
             # co-occurrence. None of this is required for a reply — every
             # branch is wrapped so a failure here does not break chat.
             try:
+                # Fusion runs FIRST so concepts and relations the user
+                # declares are present in the universe before grounding.
+                self.last_fusion_result = self.concept_fusion.fuse(message)
+                if self.last_fusion_result and self.last_fusion_result.added:
+                    self.grounder.refresh()
                 self.last_grounding = self.grounder.ground(message)
                 self.deriver.observe_text(message)
                 self.last_question_analysis = analyze_question(
@@ -672,6 +685,27 @@ class DarwinRuntime:
                         p.question for p in (self.last_curiosity or [])
                     ],
                 )
+                # Multi-inference synthesis or self-introspection if the
+                # question kind warrants it.
+                if analysis and analysis.kind == "opinion":
+                    self.last_synthesis = synthesize_self_introspection(
+                        grounded_concepts=self.last_grounding.concept_names,
+                        universe_summary=self.universe.summary(),
+                        reasoning_trace=self.last_reasoning_trace,
+                        dialogue_memory_summary=self.dialogue_memory.summary(),
+                        inferences_count=len(only_inferences),
+                    )
+                elif len(only_inferences) >= 2:
+                    self.last_synthesis = synthesize(
+                        question_kind=analysis.kind if analysis else "unknown",
+                        grounded_concepts=self.last_grounding.concept_names,
+                        inferences=only_inferences,
+                        contradictions=only_contradictions,
+                        reasoning_trace=self.last_reasoning_trace,
+                        universe_summary=self.universe.summary(),
+                    )
+                else:
+                    self.last_synthesis = None
             except Exception:
                 self.last_grounding = None
                 self.last_reasoning_trace = None
@@ -679,6 +713,8 @@ class DarwinRuntime:
                 self.last_curiosity = []
                 self.last_rendered_answer = None
                 self.last_question_analysis = None
+                self.last_fusion_result = None
+                self.last_synthesis = None
 
             user_frame = self.darwin.interpret_language(message, source="user")
             response = self._respond(message, user_frame, user_id=user_id)
@@ -726,6 +762,31 @@ class DarwinRuntime:
 
             if self.store is not None:
                 self.store.record_chat("darwin", response)
+
+            # Record the turn into dialogue memory so future turns can
+            # reference what was discussed.
+            try:
+                grounded_names = (
+                    self.last_grounding.concept_names if self.last_grounding else []
+                )
+                inferences_used = []
+                if self.last_rendered_answer:
+                    inferences_used = list(self.last_rendered_answer.used_inferences)
+                if self.last_synthesis:
+                    inferences_used.append(self.last_synthesis.style)
+                kind = (
+                    self.last_question_analysis.kind
+                    if self.last_question_analysis else "unknown"
+                )
+                self.dialogue_memory.record(
+                    user_text=message,
+                    darwin_text=response,
+                    grounded_concepts=grounded_names,
+                    inferences_used=inferences_used,
+                    question_kind=kind,
+                )
+            except Exception:
+                pass
 
             self._event(
                 "chat",
@@ -865,33 +926,91 @@ class DarwinRuntime:
         # (e.g. concede_uncertainty style) are NOT preferred over the v5
         # path — those go through the standard discourse.
         try:
+            synthesis = self.last_synthesis
             rendered = self.last_rendered_answer
-            # Only prefer the universe-grounded answer when the inference
-            # engine itself produced a derivation we can show — neighborhood
-            # summaries and curiosity probes are NOT good enough to replace
-            # the v5 composer for this turn.
-            strong_inference_ops = {
-                "is_a_chain", "causal_chain", "shortest_path", "inheritance",
-                "contradiction", "definition",
-            }
-            has_real_inference = bool(
-                rendered is not None
-                and any(op in strong_inference_ops for op in rendered.used_inferences)
-            )
-            if (
-                has_real_inference
-                and rendered.style != "concede_uncertainty"
-                and rendered.text
-                and len(rendered.text) > 10
-            ):
-                draft = rendered.text
+            # Self-introspection takes top priority when applicable.
+            if synthesis is not None and synthesis.style == "self_introspection" and synthesis.text:
+                draft = synthesis.text
                 trace.add(
-                    "universe_answer",
-                    f"replaced DLM output with universe-grounded answer "
-                    f"({len(rendered.used_inferences)} inference(s))",
-                    confidence=0.85,
-                    evidence=rendered.used_inferences,
+                    "self_introspection",
+                    "answered from self-introspection synthesis",
+                    confidence=synthesis.confidence,
                 )
+            # Multi-inference synthesis: when 2+ inferences fired, use the
+            # synthesized paragraph rather than the single-fact renderer.
+            elif synthesis is not None and synthesis.style == "synthesis" and synthesis.text:
+                draft = synthesis.text
+                trace.add(
+                    "synthesis",
+                    f"answered from {len(synthesis.sentences)}-sentence synthesis",
+                    confidence=synthesis.confidence,
+                )
+            else:
+                # Only prefer the universe-grounded answer when the inference
+                # engine itself produced a derivation we can show.
+                strong_inference_ops = {
+                    "is_a_chain", "causal_chain", "shortest_path",
+                    "inheritance", "contradiction", "definition",
+                }
+                has_real_inference = bool(
+                    rendered is not None
+                    and any(op in strong_inference_ops for op in rendered.used_inferences)
+                )
+                if (
+                    has_real_inference
+                    and rendered.style != "concede_uncertainty"
+                    and rendered.text
+                    and len(rendered.text) > 10
+                ):
+                    draft = rendered.text
+                    trace.add(
+                        "universe_answer",
+                        f"replaced DLM output with universe-grounded answer "
+                        f"({len(rendered.used_inferences)} inference(s))",
+                        confidence=0.85,
+                        evidence=rendered.used_inferences,
+                    )
+                else:
+                    # No derivation. If the user posed a clear question with
+                    # grounded concepts, prefer an honest non-answer over the
+                    # v5 composer's confabulation. The v5 composer's chatter
+                    # about Darwin's substrate is good for casual chat but
+                    # bad for "is X composed of Y?"-style questions where the
+                    # graph genuinely doesn't have the answer.
+                    analysis = self.last_question_analysis
+                    grounded = self.last_grounding
+                    no_real_inference = not any(
+                        op in strong_inference_ops
+                        for op in (rendered.used_inferences if rendered else [])
+                    )
+                    # Only override for *structural* questions where the v5
+                    # semantic memory path is unlikely to have content:
+                    # kind_check and contradiction. Causal / relation /
+                    # comparison questions often have useful v5 semantic
+                    # retrieval ("X means Y" learned earlier), so we let
+                    # those fall through to the v5 path.
+                    if (
+                        analysis is not None
+                        and analysis.is_question
+                        and analysis.kind in ("kind_check", "contradiction")
+                        and grounded is not None
+                        and grounded.concept_names
+                        and no_real_inference
+                    ):
+                        # Honest non-answer with a curiosity probe.
+                        seeds = ", ".join(grounded.concept_names[:3])
+                        curiosity_q = ""
+                        if self.last_curiosity:
+                            curiosity_q = " " + self.last_curiosity[0].question
+                        draft = (
+                            f"I don't have a confident derivation about {seeds} "
+                            f"from my universe right now.{curiosity_q}"
+                        ).strip()
+                        trace.add(
+                            "honest_unknown",
+                            "no derivation; honest non-answer with curiosity probe",
+                            confidence=0.4,
+                        )
         except Exception:
             pass
 

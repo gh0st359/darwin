@@ -689,6 +689,48 @@ class DarwinDaemon:
                         f"    via {step.get('source')} —{step.get('kind')}→ {step.get('target')}"
                     )
             return out
+        if head == "/fusion":
+            fusion = getattr(runtime, "concept_fusion", None)
+            if fusion is None:
+                return ["concept fusion not active"]
+            summary = fusion.summary()
+            out = [
+                f"total_fused={summary['total_fused']} by_kind={summary['by_kind']}",
+                "recent:",
+            ]
+            for r in summary["recent"]:
+                out.append(f"  {r['source']} —{r['kind']}→ {r['target']}")
+            return out
+        if head == "/dialogue":
+            memory = getattr(runtime, "dialogue_memory", None)
+            if memory is None:
+                return ["dialogue memory not active"]
+            summary = memory.summary()
+            out = [
+                f"turns={summary['turns']}/{summary['capacity']} "
+                f"tracked_concepts={summary['tracked_concepts']}",
+                f"most_discussed: {summary['most_discussed']}",
+                f"question_kinds: {summary['question_kinds']}",
+                "recent turns:",
+            ]
+            for turn in memory.latest(5):
+                out.append(
+                    f"  T{turn.turn_index} [{turn.question_kind}] "
+                    f"you: {turn.user_text[:60]!r} -> "
+                    f"darwin: {turn.darwin_text[:80]!r}"
+                )
+            return out
+        if head == "/synthesis":
+            synth = getattr(runtime, "last_synthesis", None)
+            if synth is None:
+                return ["no synthesis from last turn"]
+            out = [
+                f"style={synth.style} confidence={synth.confidence:.2f}",
+                f"text: {synth.text}",
+            ]
+            for s in synth.sentences:
+                out.append(f"  - {s}")
+            return out
         if head == "/curiosity":
             engine = getattr(runtime, "curiosity_engine", None)
             if engine is None:

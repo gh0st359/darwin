@@ -109,15 +109,46 @@ class InferenceEngine:
         """Does ``source`` reach ``target`` through transitive kind edges?
 
         Returns an Inference with the full chain, or None if no such chain
-        exists within ``max_chain_length`` hops.
+        exists within ``max_chain_length`` hops. The claim verb adapts to
+        the chain's relation kinds: pure is_a/instantiates chains read
+        as "X is a Y"; chains that include part_of read as "X is part of Y";
+        mixed chains read as "X is connected to Y" to stay honest.
+
+        Forward chain is tried first; if none exists, an *incoming* part_of
+        chain is tried (i.e. "is source composed of target?" succeeds when
+        target part_of source). The reverse-direction claim is rendered
+        with "is composed of" so the semantics is correct.
         """
 
         path = self._transitive_path(source, target, _TRANSITIVE_KINDS)
         if not path:
+            # Try reverse direction: target → ... → source via part_of /
+            # is_a. This catches "is X composed of Y?" by checking
+            # Y part_of (... part_of) X.
+            reverse = self._transitive_path(target, source, frozenset({"part_of"}))
+            if reverse:
+                return Inference(
+                    operator="is_a_chain",
+                    claim=f"{source} is composed of {target}",
+                    source=source,
+                    target=target,
+                    chain=[rel.to_record() for rel in reverse],
+                    confidence=max(0.4, 1.0 - 0.05 * len(reverse)),
+                    notes="reverse part_of chain",
+                )
             return None
+        kinds_in_chain = {rel.kind for rel in path}
+        if kinds_in_chain.issubset({"is_a", "instantiates"}):
+            claim_verb = "is a"
+        elif kinds_in_chain.issubset({"part_of"}):
+            claim_verb = "is part of"
+        elif kinds_in_chain == {"is_a", "part_of"} or kinds_in_chain == {"instantiates", "part_of"} or "part_of" in kinds_in_chain:
+            claim_verb = "is part of"
+        else:
+            claim_verb = "is connected to"
         return Inference(
             operator="is_a_chain",
-            claim=f"{source} is a {target}",
+            claim=f"{source} {claim_verb} {target}",
             source=source,
             target=target,
             chain=[rel.to_record() for rel in path],

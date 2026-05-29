@@ -41,12 +41,19 @@ from darwin.universe.answer import (
     render_inference,
     render_reasoning_summary,
 )
+from darwin.universe.dialogue_memory import DialogueMemory, DialogueTurn
+from darwin.universe.fusion import ConceptFusion, FusedRelation, FusionResult
 from darwin.universe.primitive_seed import primitive_names, seed_primitives
 from darwin.universe.question import QuestionAnalysis, analyze_question
 from darwin.universe.reasoning import (
     ConceptualReasoner,
     ReasoningStep,
     ReasoningTrace,
+)
+from darwin.universe.synthesis import (
+    SynthesizedAnswer,
+    synthesize,
+    synthesize_self_introspection,
 )
 from darwin.universe.world import CONCEPTUAL_ACTIONS, ConceptualWorld
 
@@ -81,11 +88,17 @@ __all__ = [
     "InferenceEngine",
     "LanguageGrounder",
     "RELATION_KINDS",
+    "ConceptFusion",
+    "DialogueMemory",
+    "DialogueTurn",
+    "FusedRelation",
+    "FusionResult",
     "QuestionAnalysis",
     "ReasoningStep",
     "ReasoningTrace",
     "Relation",
     "RenderedAnswer",
+    "SynthesizedAnswer",
     "analyze_question",
     "build_answer",
     "build_default_universe",
@@ -97,5 +110,7 @@ __all__ = [
     "render_inference",
     "render_reasoning_summary",
     "seed_primitives",
+    "synthesize",
+    "synthesize_self_introspection",
     "tokenize",
 ]
