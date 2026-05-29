@@ -85,6 +85,31 @@ def main(argv: list[str] | None = None) -> int:
         help="Optional per-word delay when printing responses (0 = instant).",
     )
 
+    chat_parser = subparsers.add_parser(
+        "chat",
+        help="Alias of 'connect' — clean chat REPL attached to 'darwin brain'.",
+    )
+    chat_parser.add_argument("--host", default=DEFAULT_HOST)
+    chat_parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    chat_parser.add_argument("--watch-events", action="store_true")
+    chat_parser.add_argument("--text-delay", type=float, default=0.0)
+
+    inspect_parser = subparsers.add_parser(
+        "inspect",
+        help=(
+            "Run a one-shot instrument command against a running brain "
+            "(/snapshot, /diff, /divergence, /beliefs, etc.). Prints lines "
+            "to stdout for scripting; does not open a chat REPL."
+        ),
+    )
+    inspect_parser.add_argument(
+        "instrument",
+        help="Instrument slash-command, e.g. '/divergence' or '/diff a b'.",
+    )
+    inspect_parser.add_argument("--host", default=DEFAULT_HOST)
+    inspect_parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    inspect_parser.add_argument("--timeout", type=float, default=10.0)
+
     export_parser = subparsers.add_parser(
         "export-training",
         help="Export accepted (plan -> rendering) pairs for DLM fine-tuning.",
@@ -132,16 +157,49 @@ def main(argv: list[str] | None = None) -> int:
             args.dlm_model,
             not args.quiet,
         )
-    if args.command == "connect":
+    if args.command == "connect" or args.command == "chat":
         return connect(
             args.host,
             args.port,
             args.watch_events,
             args.text_delay,
         )
+    if args.command == "inspect":
+        return inspect(args.host, args.port, args.instrument, args.timeout)
     if args.command == "export-training":
         return export_training(args.source, args.destination, args.min_quality, args.renderer)
     return 1
+
+
+def inspect(host: str, port: int, instrument: str, timeout: float) -> int:
+    """Run a single instrument slash-command against a running brain.
+
+    This is the third lens of the two-terminal architecture: the brain
+    terminal streams events, the chat terminal stays clean, and `darwin
+    inspect` is the one-shot CLI for scripted queries (e.g. snapshot
+    captures, divergence reports, belief dumps).
+    """
+
+    instrument = instrument.strip()
+    if not instrument.startswith("/"):
+        instrument = "/" + instrument
+    client = DarwinClient(host=host, port=port)
+    try:
+        client.connect(lambda _message: None)
+    except OSError as exc:
+        print(f"could not connect to brain at {host}:{port}: {exc}")
+        print("Did you start it with 'darwin brain' first?")
+        return 1
+    try:
+        lines = client.command(instrument, timeout=timeout)
+    except Exception as exc:
+        print(f"inspect error: {exc}")
+        return 2
+    finally:
+        client.close()
+    for line in lines:
+        print(line)
+    return 0
 
 
 def export_training(source: Path, destination: Path, min_quality: float, renderer: str | None) -> int:

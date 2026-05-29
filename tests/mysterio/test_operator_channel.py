@@ -1,22 +1,24 @@
-"""Tests for the operator-tier event subscription."""
+"""Tests for the interior event-kind taxonomy.
+
+v6 redesign: the former operator/secrecy partition is gone. All event kinds
+are now visible to any subscriber that opts in. The taxonomy survives only as
+a *topical* grouping the brain terminal can use for display.
+"""
 
 from __future__ import annotations
 
-import os
-
-import pytest
-
 from darwin.mysterio.operator_channel import (
+    INTERIOR_EVENT_KINDS,
     OPERATOR_EVENT_KINDS,
-    OperatorAuth,
+    is_interior_kind,
     is_operator_kind,
 )
 
 
-def test_operator_event_kinds_includes_expected_set() -> None:
+def test_interior_event_kinds_includes_expected_set() -> None:
     expected = {
-        "private_simulation",
-        "self_world",
+        "interior_simulation",
+        "interior_world",
         "quarantine",
         "divergence",
         "snapshot_diff",
@@ -26,30 +28,25 @@ def test_operator_event_kinds_includes_expected_set() -> None:
         "research_finding",
         "subsystem_event",
     }
-    assert expected <= set(OPERATOR_EVENT_KINDS)
+    assert expected <= set(INTERIOR_EVENT_KINDS)
 
 
-def test_is_operator_kind_classifies_correctly() -> None:
-    assert is_operator_kind("divergence")
-    assert is_operator_kind("meta_proposal")
+def test_is_interior_kind_classifies_correctly() -> None:
+    assert is_interior_kind("divergence")
+    assert is_interior_kind("meta_proposal")
+    assert is_interior_kind("interior_simulation")
+    assert not is_interior_kind("chat")
+    assert not is_interior_kind("self_modification")
+    assert not is_interior_kind("simulation")  # grounded sim, not the interior one
+
+
+def test_legacy_operator_kinds_alias_still_resolves() -> None:
+    """Old callers importing OPERATOR_EVENT_KINDS see a superset that includes
+    the legacy spellings ``private_simulation`` / ``self_world`` so they do
+    not break during the rename window."""
+
+    assert INTERIOR_EVENT_KINDS <= OPERATOR_EVENT_KINDS
+    assert "private_simulation" in OPERATOR_EVENT_KINDS
+    assert is_operator_kind("private_simulation")
+    assert is_operator_kind("interior_simulation")
     assert not is_operator_kind("chat")
-    assert not is_operator_kind("self_modification")
-    assert not is_operator_kind("simulation")  # public sim, not the private one
-
-
-def test_auth_without_token_accepts_any_supplied(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("DARWIN_OPERATOR_TOKEN", raising=False)
-    auth = OperatorAuth()
-    assert auth.verify(None)
-    assert auth.verify("anything")
-    assert not auth.is_configured()
-
-
-def test_auth_with_token_requires_match(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DARWIN_OPERATOR_TOKEN", "secret")
-    auth = OperatorAuth()
-    assert auth.is_configured()
-    assert auth.verify("secret")
-    assert not auth.verify("wrong")
-    assert not auth.verify(None)
-    assert not auth.verify("")

@@ -1,25 +1,26 @@
-"""Operator-tier event subscription.
+"""Topical event-kind taxonomy.
 
-Public chat clients see the existing public RuntimeEvent stream unchanged.
-Operator clients hold a shared-secret token (env var `DARWIN_OPERATOR_TOKEN`)
-and can subscribe to the additional `OPERATOR_EVENT_KINDS` — private
-simulations, snapshot diffs, quarantine entries, divergence reports,
-meta-proposals, code-gen events, narrative ticks, research findings.
+This file used to gate "operator" subscriptions behind a shared-secret token.
+Per the v6 redesign, there is no secrecy partition: every connected subscriber
+sees every event kind. What remains is a topical *taxonomy* — names that group
+the interior-cognition events so the brain terminal can colour or filter them
+for display, never to hide them.
 
-This is a UX/observability tier, not access control: a single operator
-operates the system; the token keeps the chat wire clean from the firehose.
+The exported set is now ``INTERIOR_EVENT_KINDS``. The legacy alias
+``OPERATOR_EVENT_KINDS`` is preserved so older call sites do not break during
+the transition, but new code should import ``INTERIOR_EVENT_KINDS``.
+
+The event kind ``private_simulation`` is renamed to ``interior_simulation`` to
+match the substrate vocabulary. The legacy spelling is kept in the alias only.
 """
 
 from __future__ import annotations
 
-import hmac
-import os
-from dataclasses import dataclass
 
-OPERATOR_EVENT_KINDS: frozenset[str] = frozenset(
+INTERIOR_EVENT_KINDS: frozenset[str] = frozenset(
     {
-        "private_simulation",
-        "self_world",
+        "interior_simulation",
+        "interior_world",
         "quarantine",
         "divergence",
         "snapshot_diff",
@@ -32,26 +33,19 @@ OPERATOR_EVENT_KINDS: frozenset[str] = frozenset(
 )
 
 
-@dataclass(frozen=True)
-class OperatorAuth:
-    env_var: str = "DARWIN_OPERATOR_TOKEN"
-
-    def expected_token(self) -> str:
-        return os.environ.get(self.env_var, "") or ""
-
-    def is_configured(self) -> bool:
-        return bool(self.expected_token())
-
-    def verify(self, supplied: str | None) -> bool:
-        expected = self.expected_token()
-        if not expected:
-            # No token configured — accept any caller. The operator console
-            # is opt-in client-side anyway.
-            return True
-        if supplied is None:
-            return False
-        return hmac.compare_digest(expected, supplied)
+# Backwards-compatibility: existing imports of OPERATOR_EVENT_KINDS still work.
+# New code should import INTERIOR_EVENT_KINDS instead.
+OPERATOR_EVENT_KINDS: frozenset[str] = INTERIOR_EVENT_KINDS | frozenset(
+    {"private_simulation", "self_world"}
+)
 
 
+def is_interior_kind(kind: str) -> bool:
+    """Whether an event kind belongs to the interior taxonomy."""
+
+    return kind in INTERIOR_EVENT_KINDS
+
+
+# Legacy alias.
 def is_operator_kind(kind: str) -> bool:
     return kind in OPERATOR_EVENT_KINDS

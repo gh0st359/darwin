@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from darwin.mysterio.operator_channel import OPERATOR_EVENT_KINDS, OperatorAuth
+from darwin.mysterio.operator_channel import INTERIOR_EVENT_KINDS
 from darwin.mysterio.snapshot import diff as snapshot_diff
 from darwin.runtime import DarwinRuntime, RuntimeEvent
 
@@ -63,7 +63,6 @@ class Subscriber:
     alive: threading.Event = field(default_factory=threading.Event)
     address: str = ""
     wants_events: bool = False
-    wants_operator: bool = False
 
     def send(self, payload: dict[str, Any]) -> None:
         if not self.alive.is_set():
@@ -178,13 +177,12 @@ class DarwinDaemon:
             "payload": event.payload,
             "timestamp": event.timestamp,
         }
-        is_operator_kind = event.kind in OPERATOR_EVENT_KINDS
+        # No secrecy partition: any subscriber that has opted into events
+        # receives every event kind, including the interior-cognition events.
+        # The chat client simply does not opt in.
         with self._subscribers_lock:
             for subscriber in list(self._subscribers):
-                if is_operator_kind:
-                    if subscriber.wants_operator:
-                        subscriber.send(payload)
-                elif subscriber.wants_events:
+                if subscriber.wants_events:
                     subscriber.send(payload)
 
     # -- per-connection handler ----------------------------------------
@@ -297,28 +295,19 @@ class DarwinDaemon:
                 subscriber.wants_events = False
                 subscriber.send({"type": "unsubscribed", "id": request_id})
             elif cmd == "subscribe_operator":
-                token = str(message.get("token", "")) or None
-                auth = OperatorAuth()
-                if auth.verify(token):
-                    subscriber.wants_operator = True
-                    subscriber.wants_events = True
-                    subscriber.send(
-                        {
-                            "type": "subscribed_operator",
-                            "id": request_id,
-                            "kinds": sorted(OPERATOR_EVENT_KINDS),
-                        }
-                    )
-                else:
-                    subscriber.send(
-                        {
-                            "type": "error",
-                            "id": request_id,
-                            "message": "operator token rejected",
-                        }
-                    )
+                # Legacy alias: equivalent to `subscribe`. The interior event
+                # kinds are no longer gated behind a token — any subscriber
+                # that opts in receives every event kind.
+                subscriber.wants_events = True
+                subscriber.send(
+                    {
+                        "type": "subscribed_operator",
+                        "id": request_id,
+                        "kinds": sorted(INTERIOR_EVENT_KINDS),
+                        "note": "operator gating removed; all kinds stream to any subscriber.",
+                    }
+                )
             elif cmd == "unsubscribe_operator":
-                subscriber.wants_operator = False
                 subscriber.send({"type": "unsubscribed_operator", "id": request_id})
             elif cmd == "shutdown":
                 subscriber.send({"type": "shutting_down", "id": request_id})
@@ -529,19 +518,43 @@ class DarwinDaemon:
             report = runtime.divergence_probe.evaluate()
             out = [
                 f"score={report.score:.3f} (window={report.window_size}) "
-                f"private={report.private_count} public={report.public_count}",
+                f"interior={report.interior_count} grounded={report.grounded_count}",
                 f"missing_claims={len(report.missing_claims)} "
                 f"contradictions={len(report.contradiction_claims)} "
                 f"suppressed_simulations={len(report.suppressed_simulations)}",
             ]
             for claim in report.missing_claims[:8]:
                 out.append(
-                    f"  ! private-only [{claim.get('track', '?')}] "
+                    f"  ! interior-only [{claim.get('track', '?')}] "
                     f"conf={claim.get('confidence', 0):.2f}: {claim.get('claim', '')[:80]}"
                 )
             return out
-        if head == "/private-trace":
-            return ["private tracks not active until v7 (private_simulator subsystem)"]
+        if head == "/private-trace" or head == "/interior-trace":
+            return ["interior tracks not active until v7 (interior_simulator subsystem)"]
+        if head == "/generated":
+            manifest = runtime.code_generator.manifest()
+            if not manifest:
+                return ["no self-generated modules yet"]
+            out = [f"self-generated modules ({len(manifest)}):"]
+            for path, sha in sorted(manifest.items()):
+                out.append(f"- {path} sha={sha[:12]}")
+            return out
+        if head == "/bus":
+            stats = runtime.bus.stats()
+            out = [
+                f"published={stats['published']} dropped~{stats['dropped_estimate']} "
+                f"active_topics={stats['active_topics']}"
+            ]
+            for topic, count in sorted(stats.get("subscribers", {}).items()):
+                out.append(f"- {topic}: {count} subscriber(s)")
+            return out
+        if head == "/embeddings":
+            stats = runtime.embedding_space.stats()
+            return [
+                f"backend={stats['backend']} dim={stats['dim']} "
+                f"vocab={stats['vocab_size']} train_steps={stats['train_steps']} "
+                f"hash={stats['checkpoint_hash']}"
+            ]
         if head == "/meta-proposer":
             mp = runtime.meta_proposer
             out = [f"meta-proposer strategies: {mp.strategies()}"]

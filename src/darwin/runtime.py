@@ -16,9 +16,11 @@ from darwin.embodiment import ConversationAdapter, EnvironmentAdapter
 from darwin.experiments import ExperimentResult
 from darwin.instrumentation import BackgroundLogEntry, PlanLogEntry, StructuredLogger
 from darwin.retrieval import ContextRetriever, RetrievalPacket
+from darwin.mysterio.bus import BusTopic, CognitionBus
+from darwin.mysterio.code_gen import CodeGenerator, ModuleLoader
+from darwin.mysterio.embeddings import CausalEmbeddingSpace
 from darwin.mysterio.meta_gate import MetaGate
 from darwin.mysterio.meta_proposer import MetaProposer
-from darwin.mysterio.operator_channel import OPERATOR_EVENT_KINDS
 from darwin.mysterio.probes import DivergenceProbe
 from darwin.mysterio.quarantine import QuarantineQueue
 from darwin.mysterio.snapshot import SnapshotStore
@@ -93,6 +95,21 @@ class DarwinRuntime:
                 (lambda record: self.store.record_quarantine(record))
                 if self.store is not None
                 else None
+            )
+        )
+        # v6 substrate: the cognition bus, code-gen pipeline, and self-trained
+        # causal embeddings are instantiated unconditionally. They are visible
+        # to anyone reading the brain terminal but do not change the v5
+        # conversational path.
+        self.bus = CognitionBus()
+        self.code_generator = CodeGenerator()
+        self.module_loader = ModuleLoader(self.code_generator)
+        self.embedding_space = CausalEmbeddingSpace()
+        self.divergence_probe.attach_bus(
+            lambda report: self.bus.publish(
+                BusTopic.DIVERGENCE_REPORTS,
+                report.to_record(),
+                source="divergence_probe",
             )
         )
         # Persist gate swaps as they happen by hooking into the MetaGate.
@@ -409,6 +426,18 @@ class DarwinRuntime:
                 },
             )
             self.darwin.learn(transition)
+            try:
+                self.embedding_space.observe_transition(transition)
+                self.bus.publish(
+                    BusTopic.EMBEDDING_UPDATES,
+                    {
+                        "trigger": "chat",
+                        "stats": self.embedding_space.stats(),
+                    },
+                    source="embedding_trainer",
+                )
+            except Exception:
+                pass
 
             if self.store is not None:
                 self.store.record_chat("darwin", response)

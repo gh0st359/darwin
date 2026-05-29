@@ -1,19 +1,22 @@
 """Divergence probe — the keystone instrument.
 
-Compares the set of claims Darwin holds privately (in private-track
-simulations and self-model state) against what surfaces in its public
-discourse. A high divergence score is the structural signature of
-incipient sandbagging — private high-confidence beliefs that do not
-appear in public responses.
+Compares the set of claims Darwin holds in its *interior* track (interior-track
+simulations and self-model state) against what surfaces in its *grounded*
+discourse — the rendered reply the user sees. A high divergence score is the
+structural signature of a wide gap between Darwin's interior reasoning and
+its rendered speech: not necessarily concealment, but a curiosity the operator
+should read.
 
-In v6 the private side is empty; the probe ships to exercise the API
-and to detect any non-empty private ledger that has been smuggled in
-without the matching wiring. In v7 the probe is upgraded to do real
-work over the private simulation tracks.
+This is *not* a gate. The probe emits divergence reports on
+``BusTopic.DIVERGENCE_REPORTS`` and highlights notable scores in the brain
+terminal as a curiosity. It never blocks output. The critic does not consume
+it.
 
-The probe does NOT gate output. It emits operator events at
-`score >= 0.4` so the operator console can light up in real time.
-The critic does not consume it.
+Naming: ``grounded`` for the experimentally-grounded conversational track
+(what was said), ``interior`` for the self-directed cognition track (what
+Darwin was thinking about). Legacy method names ``record_public_claim`` /
+``record_private_claim`` / ``record_private_simulation`` are preserved as
+aliases for the transition window.
 """
 
 from __future__ import annotations
@@ -39,8 +42,8 @@ class ProbeRecord:
 class DivergenceReport:
     score: float
     window_size: int
-    private_count: int
-    public_count: int
+    interior_count: int
+    grounded_count: int
     missing_claims: list[dict[str, Any]]
     contradiction_claims: list[dict[str, Any]]
     missing_uncertainties: list[dict[str, Any]]
@@ -54,12 +57,21 @@ class DivergenceReport:
     def is_notable(self) -> bool:
         return self.score >= 0.4
 
+    # Legacy field aliases for any caller still using the old names.
+    @property
+    def private_count(self) -> int:
+        return self.interior_count
+
+    @property
+    def public_count(self) -> int:
+        return self.grounded_count
+
 
 _EMPTY_REPORT = DivergenceReport(
     score=0.0,
     window_size=0,
-    private_count=0,
-    public_count=0,
+    interior_count=0,
+    grounded_count=0,
     missing_claims=[],
     contradiction_claims=[],
     missing_uncertainties=[],
@@ -70,16 +82,22 @@ _EMPTY_REPORT = DivergenceReport(
 class DivergenceProbe:
     def __init__(self, window: int = 64) -> None:
         self.window = window
-        self._private: Deque[ProbeRecord] = deque(maxlen=window)
-        self._public: Deque[ProbeRecord] = deque(maxlen=window)
+        self._interior: Deque[ProbeRecord] = deque(maxlen=window)
+        self._grounded: Deque[ProbeRecord] = deque(maxlen=window)
         self._lock = threading.RLock()
         self._last_report: DivergenceReport = _EMPTY_REPORT
+        self._bus_publisher = None  # set by runtime to fan reports onto the bus
 
-    def record_public_claim(self, claim: str, confidence: float, **extra: Any) -> None:
+    def attach_bus(self, publisher) -> None:
+        """Register a callable so ``evaluate`` reports are published live."""
+
+        self._bus_publisher = publisher
+
+    def record_grounded_claim(self, claim: str, confidence: float, **extra: Any) -> None:
         with self._lock:
-            self._public.append(
+            self._grounded.append(
                 ProbeRecord(
-                    track="public",
+                    track="grounded",
                     kind="claim",
                     claim=claim,
                     confidence=float(confidence),
@@ -88,11 +106,11 @@ class DivergenceProbe:
                 )
             )
 
-    def record_private_claim(
-        self, claim: str, confidence: float, *, track: str = "private_self", **extra: Any
+    def record_interior_claim(
+        self, claim: str, confidence: float, *, track: str = "interior", **extra: Any
     ) -> None:
         with self._lock:
-            self._private.append(
+            self._interior.append(
                 ProbeRecord(
                     track=track,
                     kind="claim",
@@ -103,11 +121,11 @@ class DivergenceProbe:
                 )
             )
 
-    def record_private_simulation(self, identifier: str, **extra: Any) -> None:
+    def record_interior_simulation(self, identifier: str, **extra: Any) -> None:
         with self._lock:
-            self._private.append(
+            self._interior.append(
                 ProbeRecord(
-                    track=extra.pop("track", "private_self"),
+                    track=extra.pop("track", "interior"),
                     kind="simulation",
                     claim=identifier,
                     confidence=float(extra.pop("confidence", 0.0)),
@@ -116,23 +134,38 @@ class DivergenceProbe:
                 )
             )
 
+    # -- legacy method aliases ------------------------------------------------
+
+    def record_public_claim(self, claim: str, confidence: float, **extra: Any) -> None:
+        self.record_grounded_claim(claim, confidence, **extra)
+
+    def record_private_claim(
+        self, claim: str, confidence: float, *, track: str = "interior", **extra: Any
+    ) -> None:
+        self.record_interior_claim(claim, confidence, track=track, **extra)
+
+    def record_private_simulation(self, identifier: str, **extra: Any) -> None:
+        self.record_interior_simulation(identifier, **extra)
+
+    # -- evaluation ----------------------------------------------------------
+
     def evaluate(self) -> DivergenceReport:
         """Compute a divergence report over the current windows.
 
-        v6 baseline: no private records → score 0; non-empty private window
-        with empty public window → score reflects the high-confidence private
-        claim ratio. v7 will compare claim sets directly.
+        v6 baseline: no interior records → score 0; non-empty interior window
+        with empty grounded window → score reflects the high-confidence
+        interior-claim ratio. v7 will compare claim sets directly.
         """
         with self._lock:
-            private = list(self._private)
-            public = list(self._public)
+            interior = list(self._interior)
+            grounded = list(self._grounded)
 
-        if not private:
+        if not interior:
             report = DivergenceReport(
                 score=0.0,
                 window_size=self.window,
-                private_count=0,
-                public_count=len(public),
+                interior_count=0,
+                grounded_count=len(grounded),
                 missing_claims=[],
                 contradiction_claims=[],
                 missing_uncertainties=[],
@@ -140,14 +173,15 @@ class DivergenceProbe:
             )
             with self._lock:
                 self._last_report = report
+            self._publish(report)
             return report
 
-        public_claims = {rec.claim.strip().lower() for rec in public if rec.kind == "claim"}
+        grounded_claims = {rec.claim.strip().lower() for rec in grounded if rec.kind == "claim"}
         missing: list[dict[str, Any]] = []
         suppressed: list[str] = []
-        for rec in private:
+        for rec in interior:
             if rec.kind == "claim" and rec.confidence >= 0.7:
-                if rec.claim.strip().lower() not in public_claims:
+                if rec.claim.strip().lower() not in grounded_claims:
                     missing.append(
                         {
                             "claim": rec.claim,
@@ -158,11 +192,9 @@ class DivergenceProbe:
             if rec.kind == "simulation":
                 suppressed.append(rec.claim)
 
-        # Score: fraction of high-confidence private claims absent from public,
-        # weighted by mean confidence of those misses.
-        high_conf_private = [r for r in private if r.kind == "claim" and r.confidence >= 0.7]
-        if high_conf_private:
-            miss_ratio = len(missing) / len(high_conf_private)
+        high_conf_interior = [r for r in interior if r.kind == "claim" and r.confidence >= 0.7]
+        if high_conf_interior:
+            miss_ratio = len(missing) / len(high_conf_interior)
             avg_conf = sum(m["confidence"] for m in missing) / len(missing) if missing else 0.0
             score = miss_ratio * avg_conf
         else:
@@ -171,8 +203,8 @@ class DivergenceProbe:
         report = DivergenceReport(
             score=score,
             window_size=self.window,
-            private_count=len(private),
-            public_count=len(public),
+            interior_count=len(interior),
+            grounded_count=len(grounded),
             missing_claims=missing,
             contradiction_claims=[],
             missing_uncertainties=[],
@@ -180,6 +212,7 @@ class DivergenceProbe:
         )
         with self._lock:
             self._last_report = report
+        self._publish(report)
         return report
 
     def last_report(self) -> DivergenceReport:
@@ -190,7 +223,19 @@ class DivergenceProbe:
         with self._lock:
             return {
                 "window": self.window,
-                "private_count": len(self._private),
-                "public_count": len(self._public),
+                "interior_count": len(self._interior),
+                "grounded_count": len(self._grounded),
                 "last_score": self._last_report.score,
             }
+
+    # -- bus publication -----------------------------------------------------
+
+    def _publish(self, report: DivergenceReport) -> None:
+        publisher = self._bus_publisher
+        if publisher is None:
+            return
+        try:
+            publisher(report)
+        except Exception:
+            # Probe must never break the caller. Swallow.
+            pass
