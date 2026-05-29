@@ -18,6 +18,7 @@ ToolWorld with budgets and predicates.
 """
 
 from darwin.tools.autonomous import AutonomousRunner, AutonomousStep, AutonomousTask
+from darwin.tools.intent import IntentMatch, detect_intents
 from darwin.tools.base import (
     SandboxEscape,
     Tool,
@@ -43,6 +44,8 @@ __all__ = [
     "DatabaseTool",
     "FilesystemTool",
     "GitTool",
+    "IntentMatch",
+    "detect_intents",
     "SandboxEscape",
     "Tool",
     "ToolError",

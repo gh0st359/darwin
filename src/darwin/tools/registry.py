@@ -56,6 +56,9 @@ class ToolRegistry:
     def tool(self, name: str) -> Tool | None:
         return self._tools.get(name)
 
+    def tool_for_action_exists(self, action_name: str) -> bool:
+        return action_name in self._bindings
+
     def actions(self) -> list[Action]:
         out: list[Action] = []
         with self._lock:

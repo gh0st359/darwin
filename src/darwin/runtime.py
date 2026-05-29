@@ -50,6 +50,7 @@ from darwin.tools import (
     ToolRegistry,
     ToolWorld,
     WebTool,
+    detect_intents,
 )
 from darwin.mysterio.world_synthesis import WorldSynthesizer
 from darwin.mysterio.proprioception import InternalProprioceptionAdapter
@@ -248,6 +249,8 @@ class DarwinRuntime:
         self.last_correction = None
         self.last_learning_probes: list = []
         self.last_reflection = None
+        self.last_tool_invocation = None
+        self.last_tool_intent = None
 
         # v9 substrate: open-ended growth.
         # WorldSynthesizer proposes new SUBSYSTEM specs that the code-gen
@@ -797,6 +800,11 @@ class DarwinRuntime:
                 # Correction detection runs BEFORE fusion so a "no, that's
                 # wrong" can refute the prior reply's inferences before any
                 # new edges land.
+                # Clear per-turn tool state up front so a turn without a
+                # tool intent never accidentally reuses the previous
+                # turn's result.
+                self.last_tool_invocation = None
+                self.last_tool_intent = None
                 self.last_correction = detect_correction(message)
                 if self.last_correction is not None:
                     last_turn = self.dialogue_memory.latest(1)
@@ -812,6 +820,32 @@ class DarwinRuntime:
                         hypothesis_engine=self.hypothesis_engine,
                         universe=self.universe,
                     )
+
+                # Tool intent detection — if the user's message names a
+                # filesystem path, URL, shell command, Python snippet, or
+                # git inquiry, route through the appropriate tool. The
+                # invocation happens here; the result is woven into the
+                # eventual response by _respond().
+                intents = detect_intents(message)
+                if intents:
+                    # Pick the highest-confidence intent that maps to a
+                    # registered action. Falls back to None if the
+                    # registry can't dispatch (the chat path then
+                    # continues to the normal universe + v5 pipeline).
+                    intents.sort(key=lambda i: i.confidence, reverse=True)
+                    for candidate in intents:
+                        if self.tool_registry.tool_for_action_exists(candidate.action) \
+                                if hasattr(self.tool_registry, "tool_for_action_exists") \
+                                else candidate.action in {
+                                    a.name for a in self.tool_registry.actions()
+                                }:
+                            self.last_tool_intent = candidate
+                            result = self.tool_registry.dispatch(
+                                candidate.action,
+                                candidate.input,
+                            )
+                            self.last_tool_invocation = result
+                            break
                 # Fusion runs next so concepts and relations the user
                 # declares are present in the universe before grounding.
                 self.last_fusion_result = self.concept_fusion.fuse(message)
@@ -1190,7 +1224,43 @@ class DarwinRuntime:
         # (e.g. concede_uncertainty style) are NOT preferred over the v5
         # path — those go through the standard discourse.
         try:
-            # Reflective prompt takes absolute top priority. If the user
+            # Tool invocation override: when a tool was already run this
+            # turn (because intent detection fired and the registry could
+            # dispatch), Darwin's reply leads with the tool result and
+            # weaves it into the answer. This is what makes "list files
+            # in ." actually list files instead of producing a v5
+            # confabulation.
+            tool_result = self.last_tool_invocation
+            tool_intent = self.last_tool_intent
+            if (
+                tool_result is not None
+                and tool_intent is not None
+                and (tool_result.success or tool_result.error)
+            ):
+                prefix = (
+                    f"I used the {tool_result.tool} tool ({tool_intent.action}). "
+                )
+                if tool_result.success:
+                    body = tool_result.output.strip() or "(no output)"
+                    if len(body) > 1500:
+                        body = body[:1500] + "\n... [truncated]"
+                    draft = prefix + "Result:\n" + body
+                else:
+                    err = tool_result.error.strip() or "unknown error"
+                    draft = prefix + f"It failed: {err}"
+                trace.add(
+                    "tool_invocation",
+                    f"reply produced by {tool_result.tool}/{tool_intent.action}",
+                    confidence=0.85 if tool_result.success else 0.4,
+                )
+                trace.final_mode = plan.mode
+                trace.final_confidence = plan.confidence
+                self.last_thought_trace = trace
+                self.last_retrieval = retrieval
+                self.last_response_plan = plan
+                self.last_critique = critique
+                return draft
+            # Reflective prompt takes second priority. If the user
             # asked "why did you say that?", walk back through the prior
             # turn's actual derivation chain.
             if is_reflective_prompt(message):
