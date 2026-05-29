@@ -720,6 +720,61 @@ class DarwinDaemon:
                     f"darwin: {turn.darwin_text[:80]!r}"
                 )
             return out
+        if head == "/tools":
+            registry = getattr(runtime, "tool_registry", None)
+            if registry is None:
+                return ["tool registry not active"]
+            summary = registry.summary()
+            out = [f"registered tools ({len(summary['tools'])}):"]
+            for entry in summary["tools"]:
+                out.append(
+                    f"- {entry['name']}: {entry['description']}"
+                )
+                for action_name in entry["actions"]:
+                    out.append(f"    action: {action_name}")
+            out.append(f"history size: {summary['history_size']}")
+            return out
+        if head == "/tool":
+            registry = getattr(runtime, "tool_registry", None)
+            if registry is None or len(parts) < 2:
+                return [
+                    "usage: /tool <action> [k=v ...]",
+                    "example: /tool fs_list path=.",
+                ]
+            action_name = parts[1]
+            payload = {"action": action_name}
+            for token in parts[2:]:
+                if "=" in token:
+                    key, value = token.split("=", 1)
+                    payload[key] = value
+            result = registry.dispatch(action_name, payload)
+            out = [
+                f"tool={result.tool} action={result.action} success={result.success} "
+                f"duration={result.duration_ms:.1f}ms",
+            ]
+            if result.error:
+                out.append(f"error: {result.error[:400]}")
+            if result.output:
+                preview = result.output[:1000]
+                out.append("output:")
+                for line in preview.splitlines():
+                    out.append(f"  {line}")
+            return out
+        if head == "/autonomous":
+            runner = getattr(runtime, "autonomous_runner", None)
+            if runner is None:
+                return ["autonomous runner not active"]
+            history = runner.history()
+            if not history:
+                return ["no autonomous tasks have run yet"]
+            out = [f"autonomous tasks ({len(history)}):"]
+            for task in history[-10:]:
+                out.append(
+                    f"- {task.task_id} {'OK' if task.success else 'WIP/FAIL'} "
+                    f"goal={task.goal!r} steps={len(task.steps)} "
+                    f"reason={task.reason_stopped!r}"
+                )
+            return out
         if head == "/reflect":
             r = getattr(runtime, "last_reflection", None)
             if r is None:

@@ -33,6 +33,17 @@ from darwin.mysterio.observer_cascade import ObserverCascade
 from darwin.mysterio.observer_modeler import ObserverModeler
 from darwin.mysterio.probes import DivergenceProbe
 from darwin.mysterio.research_loop import LiveResearcher
+from darwin.tools import (
+    AutonomousRunner,
+    CodeExecutionTool,
+    DatabaseTool,
+    FilesystemTool,
+    GitTool,
+    TerminalTool,
+    ToolRegistry,
+    ToolWorld,
+    WebTool,
+)
 from darwin.mysterio.world_synthesis import WorldSynthesizer
 from darwin.mysterio.proprioception import InternalProprioceptionAdapter
 from darwin.mysterio.quarantine import QuarantineQueue
@@ -244,6 +255,26 @@ class DarwinRuntime:
         self.live_researcher = LiveResearcher(meta_proposer=self.meta_proposer)
         self.code_modality = CodeModalityAdapter()
         self.web_modality = WebModalityAdapter(active=False)
+
+        # Real-world tool harness — sandboxed adapters for filesystem,
+        # terminal, code execution, web, git, sqlite. The sandbox root
+        # lives under DARWIN_DATA_DIR so it cooperates cleanly with the
+        # test isolation fixture and never escapes the operator's
+        # designated data directory.
+        from darwin.paths import data_dir
+
+        sandbox_root = data_dir() / "sandbox" / "workspace"
+        sandbox_root.mkdir(parents=True, exist_ok=True)
+        self.tool_sandbox_root = sandbox_root
+        self.tool_registry = ToolRegistry()
+        self.tool_registry.register(FilesystemTool(sandbox_root))
+        self.tool_registry.register(TerminalTool(sandbox_root))
+        self.tool_registry.register(CodeExecutionTool(sandbox_root))
+        self.tool_registry.register(WebTool())
+        self.tool_registry.register(GitTool(sandbox_root))
+        self.tool_registry.register(DatabaseTool(sandbox_root))
+        self.tool_world = ToolWorld(self.tool_registry)
+        self.autonomous_runner = AutonomousRunner(self.tool_world)
         # Persist gate swaps as they happen by hooking into the MetaGate.
         if self.store is not None:
             self._wire_gate_history_persistence()
