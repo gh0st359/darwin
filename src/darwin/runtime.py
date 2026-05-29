@@ -44,6 +44,8 @@ from darwin.universe import (
     ConceptDeriver,
     ConceptUniverse,
     ConceptualReasoner,
+    CuriosityEngine,
+    InferenceEngine,
     LanguageGrounder,
     build_default_universe,
 )
@@ -184,8 +186,12 @@ class DarwinRuntime:
             embedding_space=self.embedding_space,
             bus=self.bus,
         )
+        self.inference_engine = InferenceEngine(self.universe)
+        self.curiosity_engine = CuriosityEngine(self.universe)
         self.last_reasoning_trace = None
         self.last_grounding = None
+        self.last_inferences: list = []
+        self.last_curiosity: list = []
 
         # v9 substrate: open-ended growth.
         # WorldSynthesizer proposes new SUBSYSTEM specs that the code-gen
@@ -606,9 +612,37 @@ class DarwinRuntime:
                     max_hops=2,
                     bridge_limit=6,
                 )
+                # Run symbolic inference over every pair of grounded seeds:
+                # is_a chains for kind-questions, causal chains for
+                # how/why-questions, opposition checks for contradiction
+                # detection. The discourse plan can render the resulting
+                # proof chains as substantive answer points.
+                self.last_inferences = []
+                seeds = self.last_grounding.concept_names
+                for i, a in enumerate(seeds):
+                    for b in seeds[i + 1: i + 5]:
+                        is_a = self.inference_engine.is_a_chain(a, b)
+                        if is_a is not None:
+                            self.last_inferences.append(is_a)
+                        is_a_rev = self.inference_engine.is_a_chain(b, a)
+                        if is_a_rev is not None:
+                            self.last_inferences.append(is_a_rev)
+                        causal = self.inference_engine.causal_chain(a, b)
+                        if causal is not None:
+                            self.last_inferences.append(causal)
+                        contradiction = self.inference_engine.contradicts(a, b)
+                        if contradiction is not None:
+                            self.last_inferences.append(contradiction)
+                # When the user asks a question and the inference engine is
+                # silent, fall back to curiosity — surface a structural
+                # question Darwin would benefit from answering.
+                if not self.last_inferences:
+                    self.last_curiosity = self.curiosity_engine.probe()[:3]
             except Exception:
                 self.last_grounding = None
                 self.last_reasoning_trace = None
+                self.last_inferences = []
+                self.last_curiosity = []
 
             user_frame = self.darwin.interpret_language(message, source="user")
             response = self._respond(message, user_frame, user_id=user_id)
@@ -727,6 +761,22 @@ class DarwinRuntime:
                     plan.confidence = min(
                         0.85, plan.confidence + 0.2 * reasoning_trace.coverage
                     )
+            # Surface inference-engine proof chains as high-priority answer
+            # points: they're the strongest grounded statements Darwin can
+            # make right now, and they're explicitly derived (not looked up).
+            for inf in (self.last_inferences or [])[:4]:
+                claim = getattr(inf, "claim", None) or getattr(inf, "reason", None)
+                if claim and claim not in (plan.answer_points or []):
+                    plan.answer_points = (plan.answer_points or []) + [claim]
+            # If nothing else was derivable, raise the curiosity questions
+            # as clarification_questions — far better than a confabulation.
+            if not self.last_inferences and self.last_curiosity:
+                existing_q = list(plan.clarification_questions or [])
+                for probe in self.last_curiosity:
+                    if probe.question not in existing_q:
+                        existing_q.append(probe.question)
+                plan.clarification_questions = existing_q[:5]
+            plan.answer_points = (plan.answer_points or [])[:10]
         except Exception:
             pass
         trace.add(

@@ -656,6 +656,49 @@ class DarwinDaemon:
             if grounding.unrecognized:
                 out.append(f"unrecognized: {grounding.unrecognized}")
             return out
+        if head == "/infer":
+            inferences = getattr(runtime, "last_inferences", None) or []
+            if not inferences:
+                return ["no inferences from last turn (try chat first)"]
+            out = [f"inferences from last turn ({len(inferences)}):"]
+            for inf in inferences:
+                claim = getattr(inf, "claim", None) or getattr(inf, "reason", "?")
+                op = getattr(inf, "operator", None) or "contradiction"
+                conf = getattr(inf, "confidence", 0.0)
+                out.append(f"  [{op}] {claim} (conf={conf:.2f})")
+                chain = getattr(inf, "chain", []) or []
+                for step in chain[:4]:
+                    if isinstance(step, dict):
+                        out.append(
+                            f"    via {step.get('source')} —{step.get('kind')}→ {step.get('target')}"
+                        )
+            return out
+        if head == "/explain":
+            engine = getattr(runtime, "inference_engine", None)
+            if engine is None or len(parts) < 3:
+                return ["usage: /explain <source> <target>"]
+            source, target = parts[1], parts[2]
+            inferences = engine.explain(source, target)
+            if not inferences:
+                return [f"no derivable connection between {source!r} and {target!r}"]
+            out = [f"explanations of {source!r} → {target!r}:"]
+            for inf in inferences:
+                out.append(f"  [{inf.operator}] {inf.claim} (conf={inf.confidence:.2f})")
+                for step in inf.chain[:6]:
+                    out.append(
+                        f"    via {step.get('source')} —{step.get('kind')}→ {step.get('target')}"
+                    )
+            return out
+        if head == "/curiosity":
+            engine = getattr(runtime, "curiosity_engine", None)
+            if engine is None:
+                return ["curiosity engine not active"]
+            probes = engine.probe()
+            if not probes:
+                return ["no curiosity probes — the universe looks well-connected"]
+            return [
+                f"[{p.kind} score={p.score:.2f}] {p.question}" for p in probes
+            ]
         if head == "/derive":
             deriver = getattr(runtime, "deriver", None)
             if deriver is None:

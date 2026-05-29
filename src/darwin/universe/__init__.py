@@ -18,7 +18,13 @@ from darwin.universe.concept_universe import (
     RELATION_KINDS,
     Relation,
 )
+from darwin.universe.curiosity import CuriosityEngine, CuriosityProbe
 from darwin.universe.derivation import ConceptDeriver, DerivedConcept
+from darwin.universe.inference import (
+    Contradiction,
+    Inference,
+    InferenceEngine,
+)
 from darwin.universe.language_universe import (
     GroundedTerm,
     GroundingResult,
@@ -54,10 +60,15 @@ __all__ = [
     "ConceptUniverse",
     "ConceptualReasoner",
     "ConceptualWorld",
+    "Contradiction",
+    "CuriosityEngine",
+    "CuriosityProbe",
     "DerivedConcept",
     "Domain",
     "GroundedTerm",
     "GroundingResult",
+    "Inference",
+    "InferenceEngine",
     "LanguageGrounder",
     "RELATION_KINDS",
     "ReasoningStep",

@@ -313,14 +313,24 @@ def brain(
         dlm=dlm,
         training_collector=TrainingDataCollector(),
     )
+    # If the operator opted into the hardcoded encyclopedic demo seed,
+    # apply it to the runtime's actual universe instance.
+    if world_kind != "room" and demo_seed:
+        from darwin.universe.demo_universe import demo_seed_universe
+
+        demo_seed_universe(runtime.universe)
+        runtime.grounder.refresh()
     daemon = DarwinDaemon(runtime, host=host, port=port)
 
     print("Project Darwin brain")
     print(f"memory={memory_path}")
     print(f"dlm={dlm.name}")
+    print(f"world={world_kind}{' +demo_seed' if demo_seed else ''}")
+    print(f"universe: {runtime.universe.summary()['concepts']} concepts, "
+          f"{runtime.universe.summary()['relations']} relations")
     print(f"listening on {host}:{port}")
     print(f"background loops: {', '.join(runtime.loop_intervals)}")
-    print("Attach a client with: darwin connect")
+    print("Attach a client with: darwin chat (or darwin connect)")
     print("Press Ctrl-C to stop.")
     try:
         daemon.serve_forever()
