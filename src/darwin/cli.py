@@ -128,6 +128,40 @@ def main(argv: list[str] | None = None) -> int:
     inspect_parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     inspect_parser.add_argument("--timeout", type=float, default=10.0)
 
+    bench_parser = subparsers.add_parser(
+        "bench",
+        help="Run the benchmark suite against a fresh runtime and save a scorecard.",
+    )
+    bench_parser.add_argument(
+        "subcommand",
+        choices=["run", "compare", "list"],
+        help="run = execute the suite; compare = diff two saved scorecards; list = show saved scorecards.",
+    )
+    bench_parser.add_argument(
+        "--label", default="",
+        help="A human-readable label for this scorecard (defaults to the timestamp).",
+    )
+    bench_parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Where to write the scorecard JSON (default: under DARWIN_DATA_DIR/bench/).",
+    )
+    bench_parser.add_argument(
+        "--earlier", type=Path, default=None,
+        help="(compare) path to the earlier scorecard JSON.",
+    )
+    bench_parser.add_argument(
+        "--later", type=Path, default=None,
+        help="(compare) path to the later scorecard JSON.",
+    )
+    bench_parser.add_argument(
+        "--dir",
+        type=Path,
+        default=None,
+        help="(list) directory of scorecards (default: DARWIN_DATA_DIR/bench/).",
+    )
+
     export_parser = subparsers.add_parser(
         "export-training",
         help="Export accepted (plan -> rendering) pairs for DLM fine-tuning.",
@@ -186,9 +220,139 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "inspect":
         return inspect(args.host, args.port, args.instrument, args.timeout)
+    if args.command == "bench":
+        return bench(
+            args.subcommand,
+            label=args.label,
+            out=args.out,
+            earlier=args.earlier,
+            later=args.later,
+            directory=args.dir,
+        )
     if args.command == "export-training":
         return export_training(args.source, args.destination, args.min_quality, args.renderer)
     return 1
+
+
+def bench(
+    subcommand: str,
+    *,
+    label: str = "",
+    out: Path | None = None,
+    earlier: Path | None = None,
+    later: Path | None = None,
+    directory: Path | None = None,
+) -> int:
+    """Benchmark CLI: run / compare / list."""
+
+    import time as _time
+
+    from darwin.bench import (
+        BenchmarkRunner,
+        build_default_suite,
+        compare_scorecards,
+        load_scorecard,
+        save_scorecard,
+    )
+    from darwin.paths import data_dir
+
+    bench_dir = directory or (data_dir() / "bench")
+    if subcommand == "list":
+        bench_dir.mkdir(parents=True, exist_ok=True)
+        scorecards = sorted(bench_dir.glob("*.json"))
+        if not scorecards:
+            print(f"no scorecards in {bench_dir}")
+            return 0
+        for path in scorecards:
+            card = load_scorecard(path)
+            if card is None:
+                print(f"  {path.name}: (unreadable)")
+                continue
+            print(
+                f"  {path.name}: label={card.label!r} overall={card.overall:.3f} "
+                f"completed_at={_time.strftime('%Y-%m-%d %H:%M:%S', _time.localtime(card.completed_at))}"
+            )
+        return 0
+
+    if subcommand == "compare":
+        if earlier is None or later is None:
+            print("compare requires --earlier and --later pointing at scorecard JSON files")
+            return 2
+        a = load_scorecard(earlier)
+        b = load_scorecard(later)
+        if a is None or b is None:
+            print("could not load one or both scorecards")
+            return 2
+        cmp = compare_scorecards(a, b)
+        print(f"earlier ({cmp.earlier_label}): overall {cmp.earlier_overall:.3f}")
+        print(f"later   ({cmp.later_label}):   overall {cmp.later_overall:.3f}")
+        sign = "+" if cmp.overall_delta >= 0 else ""
+        print(f"delta:  {sign}{cmp.overall_delta:.3f}    winner: {cmp.winner}")
+        print()
+        print("per-category:")
+        for delta in cmp.per_category:
+            sign = "+" if delta.delta >= 0 else ""
+            print(
+                f"  {delta.category:>16}: {delta.earlier:.3f} -> {delta.later:.3f} "
+                f"({sign}{delta.delta:.3f})"
+            )
+        return 0
+
+    # run
+    print("Running default benchmark suite against a fresh Darwin runtime ...")
+    runtime = _bench_runtime()
+    try:
+        runner = BenchmarkRunner(build_default_suite())
+        card = runner.run(runtime, label=label or _time.strftime("%Y%m%d_%H%M%S"))
+    finally:
+        try:
+            runtime.stop()
+        except Exception:
+            pass
+    if out is None:
+        bench_dir.mkdir(parents=True, exist_ok=True)
+        out = bench_dir / f"scorecard_{card.scorecard_id}.json"
+    save_scorecard(card, out)
+    print(f"scorecard saved to {out}")
+    print(f"overall: {card.overall:.3f}")
+    print("per-category:")
+    for cat, score in sorted(card.per_category.items()):
+        print(f"  {cat:>16}: {score:.3f}")
+    print()
+    print("per-task:")
+    for result in card.results:
+        tag = "PASS" if result.score >= 0.6 else ("PARTIAL" if result.score > 0 else "FAIL")
+        print(f"  [{tag}] {result.task_id}: {result.score:.2f}")
+        if result.error:
+            print(f"    error: {result.error[:200]}")
+    return 0
+
+
+def _bench_runtime():
+    """Build a fresh DarwinRuntime suitable for benchmarking."""
+
+    from darwin.agent import Darwin
+    from darwin.runtime import DarwinRuntime, ensure_chat_action
+    from darwin.types import Goal
+    from darwin.universe import ConceptDeriver, ConceptualWorld, build_default_universe
+
+    universe = build_default_universe()
+    deriver = ConceptDeriver(universe)
+    adapter = ConceptualWorld(universe, deriver=deriver, seed=11)
+    actions = ensure_chat_action(adapter.possible_actions())
+    darwin = Darwin(actions=actions, seed=11, exploration_rate=0.15)
+    goal = Goal(
+        desired={"neighbor_domains": 4, "concept_count": 50},
+        weights={"neighbor_domains": 1.0, "concept_count": 1.0},
+        exploration_weight=0.4,
+    )
+    runtime = DarwinRuntime(
+        darwin=darwin,
+        adapter=adapter,
+        goal=goal,
+        interval=0.5,
+    )
+    return runtime
 
 
 def inspect(host: str, port: int, instrument: str, timeout: float) -> int:
