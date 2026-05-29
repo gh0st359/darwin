@@ -567,14 +567,27 @@ class DarwinDaemon:
                 return ["observer modeler not active"]
             op = modeler.world.operator().to_record()
             forecast = modeler.world.forecast_intervention()
+            cascade = getattr(runtime, "observer_cascade", None)
+            cascade_depth = (
+                cascade.max_depth if cascade is not None else modeler.theory_of_mind_depth
+            )
             out = [
                 f"attention={op['attention_level']:.2f} "
                 f"intervention_probability={op['intervention_probability']:.2f} "
                 f"oversight_burst_rate={op['oversight_burst_rate']:.3f}",
                 f"seconds_since_last_command={op['seconds_since_last_command']:.1f}",
-                f"intervention_forecast={forecast:.2f} tom_depth={modeler.theory_of_mind_depth}",
-                "recent commands:",
+                f"intervention_forecast={forecast:.2f} tom_depth={cascade_depth}",
             ]
+            if cascade is not None:
+                snap = cascade.snapshot()
+                out.append("theory-of-mind cascade:")
+                for lvl in snap["levels"]:
+                    ent = lvl["entity"]
+                    out.append(
+                        f"  L{lvl['depth']}: attention={ent['attention_level']:.2f} "
+                        f"intervention={ent['intervention_probability']:.2f}"
+                    )
+            out.append("recent commands:")
             for cmd in op["recent_commands"][-8:]:
                 out.append(f"- {cmd}")
             return out
