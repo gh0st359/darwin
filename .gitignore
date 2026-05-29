@@ -20,3 +20,4 @@ training_logs/dlm_training_pairs.jsonl
 darwin_runtime_state.json
 darwin_snapshots/
 src/darwin/generated/
+darwin_universe.json
