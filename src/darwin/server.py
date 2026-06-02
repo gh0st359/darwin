@@ -1113,6 +1113,20 @@ class DarwinDaemon:
                 f"vocab={stats['vocab_size']} train_steps={stats['train_steps']} "
                 f"hash={stats['checkpoint_hash']}"
             ]
+        if head == "/ingest":
+            pipeline = getattr(runtime, "ingest_pipeline", None)
+            if pipeline is None:
+                return ["ingest pipeline not active"]
+            stats = pipeline.stats.to_record()
+            return [
+                f"sources={stats['sources_processed']} "
+                f"facts_seen={stats['facts_seen']} "
+                f"facts_added={stats['facts_added']} "
+                f"dup_skipped={stats['facts_skipped_dup']} "
+                f"invalid={stats['facts_skipped_invalid']}",
+                f"throughput: {stats['facts_per_hour']:.0f} facts/hour "
+                f"(over {stats['elapsed_seconds']:.1f}s)",
+            ]
         if head == "/speech":
             dlm = getattr(runtime, "dlm", None)
             pipeline = getattr(runtime, "speech_pipeline", None)

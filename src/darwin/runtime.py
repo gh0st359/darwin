@@ -444,6 +444,41 @@ class DarwinRuntime:
             self.speech_lexicon = None
             self.speech_pipeline = None
             self.speech_dlm = None
+
+        # V-Ingest: pure-Python knowledge ingestion. Document / Wikipedia /
+        # ArXiv / code-repo ingesters all funnel through IngestPipeline,
+        # which adds Facts to the universe and activates corresponding
+        # mesh cells. Available via runtime.ingest_pipeline.ingest_text(),
+        # ingest_html(), ingest_file(), and the four ingester helpers.
+        try:
+            from darwin.ingest import (
+                ArxivIngester,
+                CodeRepoIngester,
+                DocumentIngester,
+                IngestPipeline,
+                NLParser,
+                WikipediaIngester,
+            )
+
+            self.nl_parser = NLParser()
+            self.document_ingester = DocumentIngester(self.nl_parser)
+            self.ingest_pipeline = IngestPipeline(
+                universe=self.universe,
+                mesh=self.cortical_mesh,
+                bus=self.bus,
+                parser=self.nl_parser,
+                document_ingester=self.document_ingester,
+            )
+            self.wikipedia_ingester = WikipediaIngester(self.document_ingester)
+            self.arxiv_ingester = ArxivIngester(self.document_ingester)
+            self.code_repo_ingester = CodeRepoIngester()
+        except Exception:
+            self.nl_parser = None
+            self.document_ingester = None
+            self.ingest_pipeline = None
+            self.wikipedia_ingester = None
+            self.arxiv_ingester = None
+            self.code_repo_ingester = None
         # Persist gate swaps as they happen by hooking into the MetaGate.
         if self.store is not None:
             self._wire_gate_history_persistence()

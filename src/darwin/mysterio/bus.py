@@ -49,6 +49,8 @@ class BusTopic(str, Enum):
     SUBSYSTEM_HEALTH = "subsystem_health"
     MESH_FIRING = "mesh_firing"
     MESH_PLASTICITY = "mesh_plasticity"
+    INGEST_PROGRESS = "ingest_progress"
+    FACT_EXTRACTED = "fact_extracted"
 
 
 @dataclass
