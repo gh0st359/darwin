@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -142,7 +143,14 @@ class DarwinRuntime:
         self.event_sink = event_sink
         self.stream_enabled = True
         self.logger = logger or StructuredLogger()
+        # V-Speech: default to the non-LLM SpeechPipeline DLM unless the
+        # operator explicitly supplies a DLM or opts out via
+        # DARWIN_USE_SPEECH=0. The actual SpeechDLM wiring happens after
+        # operator_models / dialogue_memory / universe are constructed
+        # (below); we leave a placeholder StubDLM here and upgrade it
+        # at the end of __init__.
         self.dlm: DarwinLanguageModule = dlm or StubDLM()
+        self._dlm_explicitly_set = dlm is not None
         self.training_collector = training_collector or TrainingDataCollector()
         self.meta_proposer = MetaProposer()
         self.meta_gate = MetaGate()
@@ -409,6 +417,33 @@ class DarwinRuntime:
         self.mesh_plasticity = PlasticityController()
         self.last_mesh_propagation = None
         self.last_mesh_plasticity_report = None
+
+        # V-Speech: non-LLM compositional NLG. Replace the placeholder DLM
+        # with a SpeechDLM unless the operator opted out or explicitly
+        # supplied a DLM at construction time.
+        try:
+            from darwin.speech import CCGLexicon, SpeechDLM, SpeechPipeline, default_lexicon_path
+
+            self.speech_lexicon = CCGLexicon()
+            self.speech_lexicon_path = default_lexicon_path()
+            try:
+                self.speech_lexicon.load(self.speech_lexicon_path)
+            except Exception:
+                pass
+            self.speech_pipeline = SpeechPipeline(
+                operator_models=self.operator_models,
+                dialogue_memory=self.dialogue_memory,
+                universe=self.universe,
+                lexicon=self.speech_lexicon,
+            )
+            self.speech_dlm = SpeechDLM(self.speech_pipeline)
+            opt_out = os.environ.get("DARWIN_USE_SPEECH", "1") == "0"
+            if not opt_out and not self._dlm_explicitly_set:
+                self.dlm = self.speech_dlm
+        except Exception:
+            self.speech_lexicon = None
+            self.speech_pipeline = None
+            self.speech_dlm = None
         # Persist gate swaps as they happen by hooking into the MetaGate.
         if self.store is not None:
             self._wire_gate_history_persistence()
@@ -510,6 +545,14 @@ class DarwinRuntime:
         try:
             if getattr(self, "mesh_persistence", None) is not None:
                 self.mesh_persistence.save(self.cortical_mesh)
+        except Exception:
+            pass
+        # Persist the speech lexicon so vocabulary survives restarts.
+        try:
+            lex = getattr(self, "speech_lexicon", None)
+            path = getattr(self, "speech_lexicon_path", None)
+            if lex is not None and path is not None:
+                lex.save(path)
         except Exception:
             pass
         self._event("runtime", "Darwin's continuous cognition loops stopped.", loop="main")

@@ -452,6 +452,10 @@ def brain(
         if not gemma_dlm_available():
             print("warning: gemma backend requested but no local model detected; DLM will fall back when unreachable.")
         dlm = GemmaDLM(backend=dlm_backend, model=dlm_model)
+    elif dlm_choice == "stub":
+        # Don't pass an explicit DLM — let DarwinRuntime upgrade to the
+        # non-LLM SpeechDLM (or to StubDLM if DARWIN_USE_SPEECH=0).
+        dlm = None
     else:
         dlm = StubDLM()
 
@@ -488,7 +492,7 @@ def brain(
 
     print("Project Darwin brain")
     print(f"memory={memory_path}")
-    print(f"dlm={dlm.name}")
+    print(f"dlm={runtime.dlm.name}")
     print(f"world={world_kind}{' +demo_seed' if demo_seed else ''}")
     print(f"universe: {runtime.universe.summary()['concepts']} concepts, "
           f"{runtime.universe.summary()['relations']} relations")

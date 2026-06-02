@@ -1113,6 +1113,44 @@ class DarwinDaemon:
                 f"vocab={stats['vocab_size']} train_steps={stats['train_steps']} "
                 f"hash={stats['checkpoint_hash']}"
             ]
+        if head == "/speech":
+            dlm = getattr(runtime, "dlm", None)
+            pipeline = getattr(runtime, "speech_pipeline", None)
+            lex = getattr(runtime, "speech_lexicon", None)
+            out = [
+                f"active dlm: {getattr(dlm, 'name', '(unknown)')}",
+            ]
+            if pipeline is not None:
+                out.append(
+                    "speech pipeline: 5-stage compositional NLG with LeakGate"
+                )
+            else:
+                out.append("speech pipeline not active")
+            if lex is not None:
+                out.append(
+                    f"lexicon: {lex.total_entries()} entries / "
+                    f"{lex.total_surfaces()} surfaces / "
+                    f"{lex.total_concepts()} concept bindings"
+                )
+            return out
+        if head == "/lexicon":
+            lex = getattr(runtime, "speech_lexicon", None)
+            if lex is None:
+                return ["speech lexicon not active"]
+            if len(parts) >= 2:
+                entries = lex.lookup(parts[1])
+                if not entries:
+                    return [f"no lexical entries for {parts[1]!r}"]
+                return [
+                    f"{e.surface}: {e.category} (concept={e.concept!r} freq={e.frequency})"
+                    for e in entries
+                ]
+            return [
+                f"lexicon: {lex.total_entries()} entries / "
+                f"{lex.total_surfaces()} surfaces / "
+                f"{lex.total_concepts()} concept bindings",
+                "usage: /lexicon <surface> to look up a specific word",
+            ]
         if head == "/mesh":
             mesh = getattr(runtime, "cortical_mesh", None)
             if mesh is None:

@@ -108,6 +108,14 @@ class FaithfulnessValidator:
         '"plan_id":',
     )
 
+    # Additional structured-internals leak patterns surfaced for V-Speech.
+    STRUCTURAL_LEAK_TOKENS = (
+        "BusTopic.",
+        "[event ",
+        "to_record(",
+        "structural_numbers",
+    )
+
     def validate(self, plan: ResponsePlan, text: str) -> tuple[bool, list[str]]:
         notes: list[str] = []
         stripped = text.strip()
@@ -132,6 +140,9 @@ class FaithfulnessValidator:
             notes.append("output regurgitated the structured plan as quoted fields")
         if "\n  -" in text or "\n- " in text or text.count("\n*") >= 2:
             notes.append("output is a bullet list instead of prose")
+        for token in self.STRUCTURAL_LEAK_TOKENS:
+            if token in text:
+                notes.append(f"output contained structural-internals token {token!r}")
         if text.count("\n\n") >= 2 and stripped.startswith(("Situation:", "Goal", "Main point", "Things")):
             notes.append("output echoes the input brief rather than rendering it")
 
