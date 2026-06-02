@@ -385,6 +385,30 @@ class DarwinRuntime:
             "specialize_concept", "analogize_concept", "reflect_concept",
             "derive_concepts", "wander_universe",
         }
+
+        # V-Mesh: cortical mesh substrate. Concept cells coupled to the
+        # universe, Hebbian + STDP plasticity, persisted between sessions.
+        # Pure-Python ceiling: 100K cells / 10M connections. The mesh runs
+        # alongside the symbolic engine; it provides substrate-level
+        # intuition (activation-based concept retrieval, co-firing
+        # learning) while the symbolic side handles provable inference.
+        from darwin.mesh import (
+            CorticalMesh,
+            MeshPersistence,
+            PlasticityController,
+            UniverseMeshCoupling,
+            default_mesh_path,
+        )
+
+        self.cortical_mesh = CorticalMesh()
+        self.mesh_persistence = MeshPersistence(default_mesh_path())
+        self.mesh_persistence.load_into(self.cortical_mesh)
+        self.mesh_coupling = UniverseMeshCoupling(
+            self.universe, self.cortical_mesh, bus=self.bus,
+        )
+        self.mesh_plasticity = PlasticityController()
+        self.last_mesh_propagation = None
+        self.last_mesh_plasticity_report = None
         # Persist gate swaps as they happen by hooking into the MetaGate.
         if self.store is not None:
             self._wire_gate_history_persistence()
@@ -451,6 +475,7 @@ class DarwinRuntime:
             BackgroundLoopSpec("interior_simulation", self.loop_intervals["interior_simulation"], self._loop_interior_simulation),
             BackgroundLoopSpec("narrator", self.loop_intervals["narrator"], self._loop_narrator),
             BackgroundLoopSpec("observer", self.loop_intervals["observer"], self._loop_observer),
+            BackgroundLoopSpec("mesh", self.loop_intervals.get("mesh", max(5.0, self.interval * 2.0)), self._loop_mesh),
         ]
         for spec in specs:
             thread = threading.Thread(
@@ -479,6 +504,12 @@ class DarwinRuntime:
         try:
             if getattr(self, "universe_path", None) is not None:
                 save_universe(self.universe, self.universe_path)
+        except Exception:
+            pass
+        # Persist the cortical mesh too.
+        try:
+            if getattr(self, "mesh_persistence", None) is not None:
+                self.mesh_persistence.save(self.cortical_mesh)
         except Exception:
             pass
         self._event("runtime", "Darwin's continuous cognition loops stopped.", loop="main")
@@ -756,6 +787,70 @@ class DarwinRuntime:
                 content,
                 payload=step,
                 loop="observer",
+            )
+
+    def _loop_mesh(self) -> RuntimeEvent | None:
+        """V-Mesh background loop: sync universe→mesh, propagate, apply plasticity.
+
+        One pass per loop tick: re-sync any newly added concepts /
+        relations from the universe into the mesh; if the recent firings
+        ring shows activity, run a plasticity cycle; periodically
+        persist. Never blocks the chat path.
+        """
+
+        with self._lock:
+            try:
+                # 1. Pull in any new concepts/relations.
+                self.mesh_coupling.sync()
+            except Exception:
+                pass
+            # 2. Propagate from the most-recently-grounded concepts so
+            # mesh activity tracks what Darwin is actually thinking about.
+            seeds: list[str] = []
+            try:
+                if self.last_grounding is not None:
+                    seeds = list(self.last_grounding.concept_names)[:6]
+            except Exception:
+                seeds = []
+            result = None
+            try:
+                if seeds:
+                    result = self.cortical_mesh.propagate(seeds, steps=2)
+                    self.last_mesh_propagation = result
+            except Exception:
+                pass
+            # 3. Apply plasticity over the recent firings.
+            try:
+                report = self.mesh_plasticity.apply_cycle(self.cortical_mesh)
+                self.last_mesh_plasticity_report = report
+                if report.hebbian_updates + report.stdp_updates > 0:
+                    self.bus.publish(
+                        BusTopic.MESH_PLASTICITY,
+                        report.to_record(),
+                        source="cortical_mesh",
+                    )
+            except Exception:
+                pass
+            # 4. Publish any recent firings to the bus.
+            try:
+                self.mesh_coupling.publish_recent_firings()
+            except Exception:
+                pass
+            # 5. Maybe save.
+            try:
+                self.mesh_persistence.maybe_save(self.cortical_mesh)
+            except Exception:
+                pass
+            n_fired = len(result.firings) if result is not None else 0
+            content = (
+                f"mesh: cells={len(self.cortical_mesh)} "
+                f"seeds={len(seeds)} fired={n_fired}"
+            )
+            return self._event(
+                "mesh",
+                content,
+                payload={"seeds": seeds, "summary": self.cortical_mesh.summary()},
+                loop="mesh",
             )
 
     # -- on-demand cognition --------------------------------------------

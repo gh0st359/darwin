@@ -1113,6 +1113,50 @@ class DarwinDaemon:
                 f"vocab={stats['vocab_size']} train_steps={stats['train_steps']} "
                 f"hash={stats['checkpoint_hash']}"
             ]
+        if head == "/mesh":
+            mesh = getattr(runtime, "cortical_mesh", None)
+            if mesh is None:
+                return ["cortical mesh not active"]
+            summary = mesh.summary()
+            out = [
+                f"cells={summary['cells']} connections={summary['connections']} "
+                f"recent_firings={summary['recent_firings']} "
+                f"propagations={summary['propagation_count']}",
+                f"connection kinds: {summary['kinds']}",
+            ]
+            last = getattr(runtime, "last_mesh_propagation", None)
+            if last is not None:
+                out.append(
+                    f"last propagation: seeds={last.seeds} "
+                    f"steps={last.steps_taken} firings={len(last.firings)} "
+                    f"final_activation={last.final_activation_total:.2f}"
+                )
+            report = getattr(runtime, "last_mesh_plasticity_report", None)
+            if report is not None:
+                out.append(
+                    f"last plasticity: hebbian={report.hebbian_updates} "
+                    f"stdp={report.stdp_updates} "
+                    f"delta_magnitude={report.total_delta_magnitude:.4f}"
+                )
+            return out
+        if head == "/cell":
+            mesh = getattr(runtime, "cortical_mesh", None)
+            if mesh is None or len(parts) < 2:
+                return ["usage: /cell <name>"]
+            cell = mesh.cell(parts[1])
+            if cell is None:
+                return [f"no cell named {parts[1]!r}"]
+            outgoing = mesh.outgoing(cell.name)
+            out = [
+                f"{cell.name}: activation={cell.activation:.3f} "
+                f"threshold={cell.threshold:.2f} salience={cell.salience:.2f} "
+                f"fires={cell.fire_count}",
+            ]
+            for conn in outgoing[:12]:
+                out.append(
+                    f"  -[{conn.kind} w={conn.weight:.2f}]-> {conn.target}"
+                )
+            return out
         if head == "/meta-proposer":
             mp = runtime.meta_proposer
             out = [f"meta-proposer strategies: {mp.strategies()}"]
