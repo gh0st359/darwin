@@ -517,6 +517,16 @@ class DarwinRuntime:
             self.resolution_prover = None
             self.reasoning_dispatcher = None
 
+        # V-Agents: six specialised cognitive subsystems composed atop
+        # mesh+speech+ingest+reason. Registry never auto-spawns processes;
+        # V-Scale flips that on via CognitionSupervisor.
+        try:
+            from darwin.agents import AgentRegistry
+
+            self.agent_registry = AgentRegistry(runtime=self)
+        except Exception:
+            self.agent_registry = None
+
         # Persist gate swaps as they happen by hooking into the MetaGate.
         if self.store is not None:
             self._wire_gate_history_persistence()

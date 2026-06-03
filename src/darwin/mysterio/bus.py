@@ -54,6 +54,8 @@ class BusTopic(str, Enum):
     REASONING_STEP = "reasoning_step"
     PROOF_FOUND = "proof_found"
     DEFEAT_FIRED = "defeat_fired"
+    AGENT_SOLVE = "agent_solve"
+    AGENT_STEP = "agent_step"
 
 
 @dataclass
