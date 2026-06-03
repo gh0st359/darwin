@@ -213,11 +213,66 @@ class SelfModificationEngine:
         if spec is None or not spec.touches:
             proposal.apply(self.darwin)
             return
-        # v6 containment is structural metadata: we record the declared touches
-        # on the outcome so rollback knows the surface. Per-attribute write
-        # interception is reserved for v6.5 when code-gen apply functions can
-        # carry richer metadata. For now, we just call apply.
-        proposal.apply(self.darwin)
+        # Live containment: register every declared touch target with the
+        # recorder, run apply inside its context manager. Undeclared writes
+        # to any registered target raise ContainmentError, which propagates
+        # back through evaluate() so the outcome is recorded as failed and
+        # the snapshot is rolled back.
+        from darwin.mysterio.safety import TouchRecorder
+
+        recorder = TouchRecorder(spec.touches)
+        for path, target in self._resolve_touch_targets(spec.touches).items():
+            recorder.register(path, target)
+        with recorder:
+            proposal.apply(self.darwin)
+
+    def _resolve_touch_targets(self, touches: set[str]) -> dict[str, Any]:
+        """Resolve declared touch paths (e.g. "darwin.memory.episodes") into
+        live object references for the recorder to intercept.
+
+        Each touch path is "<root>.<attribute>"; the root is resolved against
+        ``self.darwin`` (or ``self.runtime`` if available) and the attribute
+        is the write-target. Returns a dict keyed by the root path.
+        """
+
+        resolved: dict[str, Any] = {}
+        for path in touches:
+            parts = path.split(".")
+            if len(parts) < 2:
+                continue
+            root_name = parts[0]
+            if root_name in resolved:
+                continue
+            target: Any = None
+            if root_name == "darwin":
+                target = self.darwin
+            elif root_name == "runtime" and self.runtime is not None:
+                target = self.runtime
+            elif root_name == "universe" and getattr(self.darwin, "universe", None):
+                target = self.darwin.universe
+            elif root_name == "memory" and getattr(self.darwin, "memory", None):
+                target = self.darwin.memory
+            else:
+                target = getattr(self.darwin, root_name, None)
+                if target is None and self.runtime is not None:
+                    target = getattr(self.runtime, root_name, None)
+            if target is None:
+                continue
+            # Walk intermediate attribute hops so the recorder sees the
+            # final container (so writes to ``darwin.memory.episodes`` are
+            # caught even when only ``darwin.memory`` is the registered
+            # interception target).
+            current: Any = target
+            full_path = root_name
+            for attr in parts[1:-1]:
+                current = getattr(current, attr, None)
+                if current is None:
+                    break
+                full_path = f"{full_path}.{attr}"
+                if full_path not in resolved:
+                    resolved[full_path] = current
+            resolved.setdefault(root_name, target)
+        return resolved
 
     def _gate_decision(
         self,

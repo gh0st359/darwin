@@ -179,6 +179,28 @@ def main(argv: list[str] | None = None) -> int:
     export_parser.add_argument("--min-quality", type=float, default=0.7)
     export_parser.add_argument("--renderer", default=None)
 
+    work_parser = subparsers.add_parser(
+        "work",
+        help="Submit or resume a long-horizon goal through V-Autonomy.",
+    )
+    work_subparsers = work_parser.add_subparsers(dest="work_command")
+    work_submit = work_subparsers.add_parser(
+        "submit", help="Submit a new free-text goal.",
+    )
+    work_submit.add_argument("description", help="What you want Darwin to do.")
+    work_submit.add_argument(
+        "--max-cycles", type=int, default=12,
+        help="Maximum task dispatches before yielding.",
+    )
+    work_resume = work_subparsers.add_parser(
+        "resume", help="Resume a previously submitted goal by id.",
+    )
+    work_resume.add_argument("goal_id")
+    work_resume.add_argument("--max-cycles", type=int, default=12)
+    work_subparsers.add_parser(
+        "list", help="List all goals and their statuses.",
+    )
+
     args = parser.parse_args(argv)
     if args.command == "run":
         return run_room(args.steps, args.seed, args.exploration)
@@ -231,6 +253,59 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "export-training":
         return export_training(args.source, args.destination, args.min_quality, args.renderer)
+    if args.command == "work":
+        return work_command(args)
+    return 1
+
+
+def work_command(args) -> int:
+    """V-Autonomy CLI: submit / resume / list long-horizon goals."""
+
+    from darwin.autonomy import GoalLedger
+
+    ledger = GoalLedger()
+    sub = getattr(args, "work_command", None)
+    if sub == "list":
+        for goal in ledger.all_goals():
+            print(f"{goal.goal_id}  {goal.status.value:<10}  {goal.description[:80]}")
+        return 0
+    # submit and resume both want a runtime so the executor can dispatch.
+    from darwin.agent import Darwin
+    from darwin.embodiment import RoomSimulationAdapter
+    from darwin.runtime import DarwinRuntime, ensure_chat_action
+    from darwin.types import Goal as RuntimeGoal
+    from darwin.worlds import AdaptiveRoomWorld
+
+    world = AdaptiveRoomWorld(seed=11)
+    adapter = RoomSimulationAdapter(world)
+    darwin = Darwin(
+        actions=ensure_chat_action(adapter.possible_actions()),
+        seed=11, exploration_rate=0.10,
+    )
+    runtime = DarwinRuntime(
+        darwin=darwin, adapter=adapter,
+        goal=RuntimeGoal(desired={"room_bright": True}),
+        interval=100.0,
+    )
+    if runtime.goal_orchestrator is None:
+        print("V-Autonomy substrate failed to initialise.")
+        return 2
+    if sub == "submit":
+        goal = runtime.goal_orchestrator.submit(args.description)
+        print(f"submitted goal {goal.goal_id}")
+        report = runtime.goal_orchestrator.run(goal, max_cycles=args.max_cycles)
+        print(f"status={report.final_status.value}  cycles={report.cycles_run}  "
+              f"done={len(report.tasks_completed)}  failed={len(report.tasks_failed)}")
+        return 0 if report.final_status.value == "succeeded" else 1
+    if sub == "resume":
+        goal = runtime.goal_ledger.goal(args.goal_id)
+        if goal is None:
+            print(f"goal {args.goal_id} not found")
+            return 2
+        report = runtime.goal_orchestrator.run(goal, max_cycles=args.max_cycles)
+        print(f"status={report.final_status.value}  cycles={report.cycles_run}")
+        return 0
+    print("usage: darwin work {submit|resume|list} ...")
     return 1
 
 

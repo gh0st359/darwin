@@ -1,27 +1,62 @@
 # Project Darwin
 
-Darwin is a non-LLM symbolic intelligence that *learns from conversation,
-proves what it claims, asks back when it doesn't know, and remembers across
-sessions*. It's built around a navigable concept graph (its "universe"),
-multi-hop symbolic inference with proof chains, proactive hypothesis
-generation, and a self-modifying causal substrate that runs in 8 background
-loops 24/7.
+Darwin is a non-LLM symbolic intelligence in active development. It learns
+from conversation, proves what it claims by reasoning over a navigable
+concept graph, asks back when it doesn't know, and remembers across
+sessions. It is **not yet** a frontier-scale autonomous mind — it is a
+substantial research substrate (V-Mesh + V-Speech + V-Ingest + V-Reason +
+V-Agents + V-Bench + V-Scale) with a path toward one. Read the limitations
+section before relying on any of the bigger claims.
 
-Not a prompt chain. Not an API wrapper. Not a fine-tuned language model. Zero
-pretrained weights are ever loaded; vectors are trained online from Darwin's
-own experience. Domain knowledge is *derived* from chat, not hardcoded — the
-only thing the default brain ships with is a ~45-concept structural seed
-(thing, change, cause, same, different, infer, …) plus the relations between
-them. Everything else grows from use.
+Not a prompt chain. Not an API wrapper. Not a fine-tuned language model.
+Zero pretrained weights are ever loaded; vectors are trained online from
+Darwin's own experience. Domain knowledge starts from a ~45-concept
+structural seed (thing, change, cause, same, different, infer, …) plus the
+relations between them; the rest is ingested or learned from use.
 
-The current head of `claude/darwin-mysterio-plan-07Sqx` is the **Universe +
-Mysterio v9** release: v6 substrate (apparatus + bus + supervisor + code-gen
-+ embeddings), v7 interior mental life (tracks, proprioception, interior
-simulator, narrative, observer), v8 distributed cognition (5-tier memory,
-long-horizon threads, continuity pressure, observer cascade), v9 open-ended
-growth (world synthesis, live research, modalities), v6.5 composer (operator
-model + 5 new dialogue modes), and the universe substrate (20 modules,
-~5,800 LOC). 364 tests green.
+The current head of `claude/darwin-mysterio-plan-07Sqx` is the
+**V-Mesh → V-Scale** release on top of the prior v9 substrate. Test count:
+**766 passing** (+ 2 properly skipped without torch/faiss). Source: ~31K
+LOC across 153 modules; tests: ~10.7K LOC across 115 modules.
+
+## What this is — and what it isn't (be honest)
+
+What it is, today, on this branch:
+
+* A symbolic concept-universe with typed relations and proof-chain
+  reasoning (forward / backward / hypothetical / Bayesian / defeasible /
+  resolution).
+* A non-LLM compositional NLG path (CCG categories, lexicon, leak-gate)
+  that emits natural prose without ever producing JSON or event lines.
+* A cortical mesh substrate (concept-cells, Hebbian + STDP plasticity,
+  bounded activation propagation) wired bidirectionally to the universe.
+* Six benchmark-targeted agents (code / math / science / planning /
+  research / dialogue) composed atop the prior substrates.
+* Six frontier benchmark adapters (MMLU / HumanEval / GPQA / ARC-AGI /
+  GSM8K / MATH) — *adapters*, not yet leaderboard-grade solvers. They
+  score 0 with explicit "dataset_not_provisioned" evidence when their
+  fixtures aren't present.
+* Optional torch / FAISS / Rust / multiprocess backends behind feature
+  flags. Pure-Python is the reference.
+* Real (not metadata-only) self-modification containment via
+  `TouchRecorder` — undeclared writes to declared targets raise
+  `ContainmentError`.
+* A hardened code-execution sandbox: static-AST denylist of dangerous
+  imports/calls, rlimit-capped subprocess, optional bubblewrap /
+  firejail / nsjail wrapper via `DARWIN_SANDBOX_BACKEND`. Terminal tool
+  is strict-allowlist by default; no shell metacharacters interpreted.
+
+What it isn't, today:
+
+* It does not yet beat frontier LLMs on MMLU, HumanEval, GPQA, ARC-AGI,
+  GSM8K, or MATH. The adapters are wired and the agents work on the
+  *easy* tail of each. Closing the gap is the next phase of work.
+* The autonomous loop is bounded: tool routing + multi-cycle goal
+  pursuit work, but persistent project-scale planning across days needs
+  the V-Autonomy phase that is still in design.
+* The sandbox is hardened but not container-graded by default. Set
+  `DARWIN_SANDBOX_BACKEND=bubblewrap` (or firejail / nsjail) in
+  production deployments.
 
 ## What Darwin can do
 
@@ -219,7 +254,7 @@ Three terminals, three roles:
 # Install
 pip install -e .
 
-# Run the test suite (364 tests, <35s)
+# Run the test suite (766 tests, <35s)
 python -m pytest tests/ -q
 
 # Two-terminal workflow
@@ -483,7 +518,7 @@ src/darwin/
 ## Tests
 
 ```bash
-python -m pytest tests/ -q   # 489 tests, ~14s
+python -m pytest tests/ -q   # 766 tests, ~14s
 ```
 
 Tests run under an autouse isolation fixture (`tests/conftest.py`) that

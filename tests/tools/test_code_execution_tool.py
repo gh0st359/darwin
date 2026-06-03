@@ -37,12 +37,37 @@ def test_empty_source_rejected(tmp_path: Path) -> None:
 
 
 def test_subprocess_cwd_is_sandbox(tmp_path: Path) -> None:
-    code = CodeExecutionTool(tmp_path)
+    # `os` is now denylisted by the static-AST inspector; opt into the
+    # trusted execution surface to read cwd from the subprocess.
+    code = CodeExecutionTool(tmp_path, allow_unsafe=True)
     result = code.execute({
         "source": "import os; print(os.getcwd())"
     })
     assert result.success
     assert str(tmp_path.resolve()) in result.output
+
+
+def test_dangerous_import_rejected_by_static_inspection(tmp_path: Path) -> None:
+    code = CodeExecutionTool(tmp_path)
+    result = code.execute({"source": "import os; os.system('echo bad')"})
+    assert not result.success
+    assert "static inspection" in result.error.lower()
+
+
+def test_eval_call_rejected_by_static_inspection(tmp_path: Path) -> None:
+    code = CodeExecutionTool(tmp_path)
+    result = code.execute({"source": "x = eval('1 + 1'); print(x)"})
+    assert not result.success
+    assert "static inspection" in result.error.lower()
+
+
+def test_trusted_flag_bypasses_inspection(tmp_path: Path) -> None:
+    code = CodeExecutionTool(tmp_path)
+    result = code.execute({
+        "source": "import os; print(os.getcwd())",
+        "trusted": True,
+    })
+    assert result.success
 
 
 def test_stdout_truncated_to_configured_size(tmp_path: Path) -> None:

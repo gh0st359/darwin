@@ -56,6 +56,9 @@ class BusTopic(str, Enum):
     DEFEAT_FIRED = "defeat_fired"
     AGENT_SOLVE = "agent_solve"
     AGENT_STEP = "agent_step"
+    GOAL_SUBMITTED = "goal_submitted"
+    GOAL_PROGRESS = "goal_progress"
+    GOAL_COMPLETED = "goal_completed"
 
 
 @dataclass

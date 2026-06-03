@@ -222,6 +222,23 @@ class DarwinRuntime:
             load_universe(self.universe, self.universe_path)
         except Exception:
             pass
+        # Seed curated domain knowledge on first boot (no overwrite). The
+        # domains are biology, chemistry, physics, math, computing,
+        # linguistics, geography — ~600 typed relations across ~400
+        # concepts. Set DARWIN_SKIP_DOMAIN_SEEDS=1 to suppress (faster
+        # boot for unit tests not exercising domain knowledge).
+        if os.environ.get("DARWIN_SKIP_DOMAIN_SEEDS", "0") != "1":
+            try:
+                from darwin.universe.domains import load_all
+
+                for source, kind, target, weight in load_all():
+                    self.universe.add_relation(
+                        source, target, kind,
+                        weight=float(weight),
+                        ensure_concepts=True,
+                    )
+            except Exception:
+                pass
         self.grounder = LanguageGrounder(
             self.universe,
             embedding_space=self.embedding_space,
@@ -526,6 +543,29 @@ class DarwinRuntime:
             self.agent_registry = AgentRegistry(runtime=self)
         except Exception:
             self.agent_registry = None
+
+        # V-Autonomy: long-horizon goal pursuit. Owns its own durable
+        # ledger so goals + tasks survive process restarts.
+        try:
+            from darwin.autonomy import (
+                GoalDecomposer,
+                GoalLedger,
+                GoalOrchestrator,
+                TaskExecutor,
+            )
+
+            self.goal_ledger = GoalLedger()
+            self.task_executor = TaskExecutor(self)
+            self.goal_orchestrator = GoalOrchestrator(
+                runtime=self,
+                ledger=self.goal_ledger,
+                decomposer=GoalDecomposer(),
+                executor=self.task_executor,
+            )
+        except Exception:
+            self.goal_ledger = None
+            self.task_executor = None
+            self.goal_orchestrator = None
 
         # V-Scale: feature flags + optional performance backends. Only
         # activate backends when their dependencies are present. The
