@@ -479,6 +479,44 @@ class DarwinRuntime:
             self.wikipedia_ingester = None
             self.arxiv_ingester = None
             self.code_repo_ingester = None
+
+        # V-Reason: six extended inference modes + dispatcher. All
+        # advisory layers on top of the existing v6.5 InferenceEngine.
+        try:
+            from darwin.reasoning import (
+                BackwardChainer,
+                BeliefNetwork,
+                DefeasibleReasoner,
+                ForwardChainer,
+                HypotheticalReasoner,
+                ReasoningDispatcher,
+                ResolutionProver,
+            )
+
+            self.forward_chainer = ForwardChainer(self.universe)
+            self.backward_chainer = BackwardChainer(self.universe)
+            self.hypothetical_reasoner = HypotheticalReasoner(self.universe)
+            self.belief_network = BeliefNetwork(self.universe)
+            self.defeasible_reasoner = DefeasibleReasoner(self.universe)
+            self.resolution_prover = ResolutionProver(self.universe)
+            self.reasoning_dispatcher = ReasoningDispatcher(
+                universe=self.universe,
+                forward=self.forward_chainer,
+                backward=self.backward_chainer,
+                hypothetical=self.hypothetical_reasoner,
+                bayesian=self.belief_network,
+                defeasible=self.defeasible_reasoner,
+                resolution=self.resolution_prover,
+            )
+        except Exception:
+            self.forward_chainer = None
+            self.backward_chainer = None
+            self.hypothetical_reasoner = None
+            self.belief_network = None
+            self.defeasible_reasoner = None
+            self.resolution_prover = None
+            self.reasoning_dispatcher = None
+
         # Persist gate swaps as they happen by hooking into the MetaGate.
         if self.store is not None:
             self._wire_gate_history_persistence()

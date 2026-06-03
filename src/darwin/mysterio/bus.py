@@ -51,6 +51,9 @@ class BusTopic(str, Enum):
     MESH_PLASTICITY = "mesh_plasticity"
     INGEST_PROGRESS = "ingest_progress"
     FACT_EXTRACTED = "fact_extracted"
+    REASONING_STEP = "reasoning_step"
+    PROOF_FOUND = "proof_found"
+    DEFEAT_FIRED = "defeat_fired"
 
 
 @dataclass
