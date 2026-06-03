@@ -167,4 +167,6 @@ def test_categories_constant_includes_all_seven() -> None:
         "coding", "memory", "learning", "adaptation",
         "planning", "reasoning", "task_completion",
     }
-    assert expected == set(CATEGORIES)
+    # V-Bench appends "frontier" additively; assert the seven legacy categories
+    # remain present alongside it.
+    assert expected.issubset(set(CATEGORIES))
