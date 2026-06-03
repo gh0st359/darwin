@@ -527,6 +527,36 @@ class DarwinRuntime:
         except Exception:
             self.agent_registry = None
 
+        # V-Scale: feature flags + optional performance backends. Only
+        # activate backends when their dependencies are present. The
+        # pure-Python implementations remain the reference.
+        try:
+            from darwin.scale import (
+                FeatureFlags,
+                TorchMeshPropagator,
+                agent_subsystem_specs,
+                faiss_available,
+                load_rust_kernel,
+                torch_available,
+            )
+
+            self.feature_flags = FeatureFlags.read_env()
+            self._torch_propagator = None
+            self._rust_kernel = None
+            if self.feature_flags.mesh_backend == "torch" and torch_available():
+                self._torch_propagator = TorchMeshPropagator()
+            if self.feature_flags.rust_kernel:
+                self._rust_kernel = load_rust_kernel()
+            if self.feature_flags.multiprocess and self.agent_registry is not None:
+                self._agent_specs = agent_subsystem_specs(self.agent_registry)
+            else:
+                self._agent_specs = []
+        except Exception:
+            self.feature_flags = None
+            self._torch_propagator = None
+            self._rust_kernel = None
+            self._agent_specs = []
+
         # Persist gate swaps as they happen by hooking into the MetaGate.
         if self.store is not None:
             self._wire_gate_history_persistence()
