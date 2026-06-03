@@ -78,7 +78,8 @@ class ResearchAgent(Agent):
         if pipeline is None:
             return 0
         try:
-            return int(pipeline.ingest_text(passage) or 0)
+            stats = pipeline.ingest_text(passage)
+            return int(getattr(stats, "facts_added", 0) or 0)
         except Exception:
             return 0
 
