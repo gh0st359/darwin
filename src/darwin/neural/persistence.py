@@ -132,6 +132,12 @@ class NeuralPersistence:
             raise ValueError(
                 f"manifest dim {manifest.dim} != live space dim {space.dim}"
             )
+        # Replace the store wholesale so a rollback truly replaces state and
+        # doesn't merge the on-disk set into whatever was in memory.
+        from darwin.neural.vector_store import VectorStore
+
+        space._store = VectorStore(dim=space.dim, backend=space.backend)
+        space._moments = {}
         loaded = space._store.load_shards(self.shards_dir())
         if self.training_path().exists():
             training = json.loads(self.training_path().read_text())

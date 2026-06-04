@@ -63,6 +63,10 @@ class EmbeddingTrainer:
         self._queue: "queue.Queue[list[str]]" = queue.Queue(maxsize=max_queue_size)
         self._stop = threading.Event()
         self._throttle = threading.Event()
+        # Held during every train_tokens call. Persistence operations
+        # (save / load / rollback) acquire it so the live space can't be
+        # mutated mid-batch.
+        self.training_lock = threading.RLock()
         self.stats = TrainerStats()
 
     # -- queue API --------------------------------------------------------- #
@@ -121,7 +125,8 @@ class EmbeddingTrainer:
             except queue.Empty:
                 break
             batch.extend(more)
-        self.space.train_tokens(batch)
+        with self.training_lock:
+            self.space.train_tokens(batch)
         self.stats.batches_trained += 1
         self.stats.tokens_consumed += len(batch)
         self.stats.last_loss = self.space.light_stats()["loss_ewma"]

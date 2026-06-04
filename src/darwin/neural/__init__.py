@@ -16,6 +16,7 @@ existing call site continues to work without change.
 
 from __future__ import annotations
 
+from darwin.neural.api import TrainingClient
 from darwin.neural.cooccurrence import CooccurrenceWindow
 from darwin.neural.corpus_stream import CorpusStream
 from darwin.neural.learned_space import LearnedCausalSpace
@@ -31,6 +32,7 @@ __all__ = [
     "LearnedCausalSpace",
     "NeuralPersistence",
     "NeuralTokenizer",
+    "TrainingClient",
     "VectorStore",
     "run_embedding_trainer",
 ]

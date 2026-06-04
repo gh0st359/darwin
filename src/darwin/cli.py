@@ -201,6 +201,44 @@ def main(argv: list[str] | None = None) -> int:
         "list", help="List all goals and their statuses.",
     )
 
+    # V-Pipeline: operator-facing training surface. Externally-driven
+    # corpus ingest at scale lives here. No LLM, no pretrained weights —
+    # Darwin learns from the text the operator streams in.
+    train_parser = subparsers.add_parser(
+        "train",
+        help="Operator-driven training surface for Darwin's learned representation.",
+    )
+    train_sub = train_parser.add_subparsers(dest="train_command")
+    train_ingest = train_sub.add_parser(
+        "ingest",
+        help="Stream a file/directory into the learned embedding substrate.",
+    )
+    train_ingest.add_argument("--path", type=Path, required=True)
+    train_ingest.add_argument("--source", default="ingest")
+    train_ingest.add_argument(
+        "--max-bytes", type=int, default=0,
+        help="Stop after this many bytes (0 = no limit).",
+    )
+    train_stream = train_sub.add_parser(
+        "stream",
+        help="Read text chunks from stdin (one chunk per line) into the trainer.",
+    )
+    train_stream.add_argument("--source", default="stdin")
+    train_sub.add_parser("status", help="Show current training-state stats.")
+    train_chk = train_sub.add_parser(
+        "checkpoint", help="Flush queue and write a labelled checkpoint.",
+    )
+    train_chk.add_argument("--label", required=True)
+    train_probe = train_sub.add_parser(
+        "probe", help="Diagnostic: nearest neighbours / freq / norm for a token.",
+    )
+    train_probe.add_argument("token")
+    train_rb = train_sub.add_parser(
+        "rollback", help="Atomically swap the active set with a labelled checkpoint.",
+    )
+    train_rb.add_argument("label")
+    train_sub.add_parser("list-checkpoints", help="List all labelled checkpoints.")
+
     args = parser.parse_args(argv)
     if args.command == "run":
         return run_room(args.steps, args.seed, args.exploration)
@@ -255,6 +293,8 @@ def main(argv: list[str] | None = None) -> int:
         return export_training(args.source, args.destination, args.min_quality, args.renderer)
     if args.command == "work":
         return work_command(args)
+    if args.command == "train":
+        return train_command(args)
     return 1
 
 
@@ -306,6 +346,133 @@ def work_command(args) -> int:
         print(f"status={report.final_status.value}  cycles={report.cycles_run}")
         return 0
     print("usage: darwin work {submit|resume|list} ...")
+    return 1
+
+
+def train_command(args) -> int:
+    """V-Pipeline CLI: ingest / stream / status / checkpoint / probe / rollback."""
+
+    import json
+    import sys
+    import time as _time
+
+    from darwin.neural import TrainingClient
+
+    sub = getattr(args, "train_command", None)
+    if sub is None:
+        print("usage: darwin train {ingest|stream|status|checkpoint|probe|rollback|list-checkpoints} ...")
+        return 1
+
+    client = TrainingClient()
+    # On every CLI invocation, attempt to restore the last persisted state so
+    # operator sessions compound across runs.
+    try:
+        client.load()
+    except Exception:
+        pass
+
+    if sub == "status":
+        stats = client.stats()
+        print(json.dumps(stats, indent=2, default=str))
+        return 0
+
+    if sub == "probe":
+        out = client.probe(args.token)
+        print(json.dumps(out, indent=2, default=str))
+        return 0
+
+    if sub == "checkpoint":
+        record = client.checkpoint(args.label)
+        print(json.dumps(record, indent=2, default=str))
+        return 0
+
+    if sub == "rollback":
+        record = client.rollback(args.label)
+        print(json.dumps(record, indent=2, default=str))
+        return 0
+
+    if sub == "list-checkpoints":
+        for label in client.list_checkpoints():
+            print(label)
+        return 0
+
+    if sub == "stream":
+        bytes_in = 0
+        chunks = 0
+        start = _time.time()
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            client.feed_corpus(line, source=args.source)
+            bytes_in += len(line)
+            chunks += 1
+        client.flush()
+        client.save()
+        elapsed = max(1e-3, _time.time() - start)
+        print(json.dumps({
+            "chunks": chunks,
+            "bytes": bytes_in,
+            "bytes_per_second": round(bytes_in / elapsed, 1),
+            "vocab_size": client.vocab(),
+        }, indent=2))
+        return 0
+
+    if sub == "ingest":
+        path: Path = args.path
+        if not path.exists():
+            print(f"path not found: {path}")
+            return 2
+        cursor_key = str(path.resolve())
+        cur = client.cursor()
+        per_path = dict(cur.get("paths", {})).get(cursor_key, {})
+        last_files = set(per_path.get("files_ingested", []))
+        files_ingested: list[str] = list(last_files)
+
+        def _files() -> list[Path]:
+            if path.is_file():
+                return [path]
+            return sorted(p for p in path.rglob("*") if p.is_file())
+
+        bytes_in = 0
+        chunks = 0
+        files_seen = 0
+        start = _time.time()
+        for fp in _files():
+            if args.max_bytes and bytes_in >= args.max_bytes:
+                break
+            rel = str(fp.resolve())
+            if rel in last_files:
+                continue
+            try:
+                text = fp.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+            client.feed_corpus(text, source=args.source)
+            files_ingested.append(rel)
+            bytes_in += len(text)
+            chunks += 1
+            files_seen += 1
+        client.flush()
+        client.save()
+        # Update cursor for resumability.
+        cur = client.cursor()
+        paths_cur = dict(cur.get("paths", {}))
+        paths_cur[cursor_key] = {"files_ingested": files_ingested}
+        cur["paths"] = paths_cur
+        client.write_cursor(cur)
+        elapsed = max(1e-3, _time.time() - start)
+        print(json.dumps({
+            "files_ingested_this_run": files_seen,
+            "total_files_known": len(files_ingested),
+            "bytes": bytes_in,
+            "bytes_per_second": round(bytes_in / elapsed, 1),
+            "chunks": chunks,
+            "vocab_size": client.vocab(),
+        }, indent=2))
+        return 0
+
+    print(f"unknown train subcommand: {sub}")
     return 1
 
 
