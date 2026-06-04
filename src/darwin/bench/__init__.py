@@ -18,6 +18,7 @@ prove its own trajectory: yesterday's scorecard sitting next to today's
 scorecard, with the trend computable from the timestamps.
 """
 
+from darwin.bench.capability import CapabilityProbe, build_capability_suite
 from darwin.bench.framework import (
     BenchmarkResult,
     BenchmarkRunner,
@@ -36,7 +37,9 @@ __all__ = [
     "BenchmarkRunner",
     "BenchmarkSuite",
     "BenchmarkTask",
+    "CapabilityProbe",
     "ScoreCard",
+    "build_capability_suite",
     "build_default_suite",
     "compare_scorecards",
     "load_scorecard",

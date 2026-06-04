@@ -560,15 +560,23 @@ class DarwinRuntime:
             self.resolution_prover = None
             self.reasoning_dispatcher = None
 
-        # V-Agents: six specialised cognitive subsystems composed atop
-        # mesh+speech+ingest+reason. Registry never auto-spawns processes;
-        # V-Scale flips that on via CognitionSupervisor.
+        # V-Mind: faculties folded into a single brain-level composition
+        # surface. Mind.consider routes by similarity to learned exemplar
+        # centroids (no hardcoded regexes); Mind.solve recruits faculties
+        # internally and produces a single Darwin-voice reply. The legacy
+        # AgentRegistry surface is preserved as a property bag on Mind so
+        # autonomy/executor and any external import paths keep working
+        # unchanged for one phase.
         try:
-            from darwin.agents import AgentRegistry
+            from darwin.faculties import Mind
 
-            self.agent_registry = AgentRegistry(runtime=self)
+            self.mind = Mind(runtime=self)
+            self.agent_registry = self.mind  # back-compat alias
+            self.last_mind_reply = None
         except Exception:
+            self.mind = None
             self.agent_registry = None
+            self.last_mind_reply = None
 
         # V-Autonomy: long-horizon goal pursuit. Owns its own durable
         # ledger so goals + tasks survive process restarts.
@@ -1577,7 +1585,36 @@ class DarwinRuntime:
                 self.last_response_plan = plan
                 self.last_critique = critique
                 return draft
-            # Reflective prompt takes second priority. If the user
+            # V-Mind override: when Mind has a confident intent over the
+            # learned representation, it recruits faculties internally and
+            # composes a single Darwin-voice reply. No faculty names ever
+            # surface in the rendered text — that's the whole point of the
+            # dispatch dissolution. Mind declines silently when its
+            # confidence is below threshold; the normal path then runs.
+            mind = getattr(self, "mind", None)
+            if mind is not None:
+                try:
+                    intent = mind.consider(message)
+                    if intent.is_actionable():
+                        reply = mind.solve(message, intent)
+                        mind.publish_step(intent, reply)
+                        if not reply.declined and reply.text:
+                            trace.add(
+                                "mind",
+                                f"answered via internal faculties (kind={reply.intent_kind})",
+                                confidence=reply.confidence,
+                            )
+                            trace.final_mode = plan.mode
+                            trace.final_confidence = plan.confidence
+                            self.last_thought_trace = trace
+                            self.last_retrieval = retrieval
+                            self.last_response_plan = plan
+                            self.last_critique = critique
+                            self.last_mind_reply = reply
+                            return reply.text
+                except Exception:
+                    pass
+            # Reflective prompt takes next priority. If the user
             # asked "why did you say that?", walk back through the prior
             # turn's actual derivation chain.
             if is_reflective_prompt(message):

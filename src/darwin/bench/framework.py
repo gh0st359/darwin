@@ -20,7 +20,7 @@ CATEGORIES: tuple[str, ...] = (
     "planning",
     "reasoning",
     "task_completion",
-    "frontier",
+    "capability",
 )
 
 

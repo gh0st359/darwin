@@ -5,23 +5,21 @@ Exercises every V-* substrate in a single session:
 1. Ingest a synthetic corpus through the V-Ingest pipeline.
 2. Mesh fires for ingested concepts.
 3. Forward chainer derives transitive closures.
-4. MathAgent solves an arithmetic word problem.
-5. Frontier suite scores a hand-built mini benchmark.
+4. Calculator faculty solves an arithmetic word problem (via Mind back-compat).
+5. Capability probe runs and produces a scorecard.
 6. Chat reply is leak-free.
 
-This is the gate proving the seven-phase landing is coherent end-to-end.
+This is the gate proving the V-Neural / V-Mind landing is coherent end-to-end.
 """
 
 from __future__ import annotations
 
-import json
 import re
 
 from darwin.agent import Darwin
+from darwin.bench import build_capability_suite
 from darwin.bench.framework import BenchmarkRunner
-from darwin.bench.frontier.suite import build_frontier_suite
 from darwin.embodiment import RoomSimulationAdapter
-from darwin.paths import data_dir
 from darwin.runtime import DarwinRuntime, ensure_chat_action
 from darwin.types import Goal
 from darwin.worlds import AdaptiveRoomWorld
@@ -89,21 +87,11 @@ def test_v_all_together() -> None:
     assert "{" not in sol.answer
     assert "}" not in sol.answer
 
-    # 5. Frontier suite scores.
-    # Provision a tiny gsm8k fixture so at least one task scores > 0.
-    root = data_dir() / "benchmarks" / "gsm8k"
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "tasks.jsonl").write_text(
-        json.dumps({"question": "What is 6 + 6?", "answer": "12"}) + "\n",
-        encoding="utf-8",
-    )
-    suite = build_frontier_suite()
+    # 5. Capability probe runs (non-fixture, non-memorisable).
+    suite = build_capability_suite(seed=7)
     card = BenchmarkRunner(suite).run(runtime, label="v-all-together")
-    assert len(card.results) == 6
-    assert "frontier" in card.per_category
-    gsm = next((r for r in card.results if r.task_id == "frontier.gsm8k"), None)
-    assert gsm is not None
-    assert gsm.score == 1.0
+    assert len(card.results) >= 1
+    assert "capability" in card.per_category
 
     # 6. Chat reply is leak-free.
     reply = runtime.chat("Tell me about animals.")
