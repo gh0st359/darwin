@@ -170,7 +170,33 @@ class DarwinRuntime:
         self.bus = CognitionBus()
         self.code_generator = CodeGenerator()
         self.module_loader = ModuleLoader(self.code_generator)
+        # V-Neural: drop-in LearnedCausalSpace via the legacy import path
+        # plus in-process trainer + corpus stream so every ingest event
+        # actually grows the learned representation.
         self.embedding_space = CausalEmbeddingSpace()
+        try:
+            import threading as _threading
+
+            from darwin.neural import CorpusStream, EmbeddingTrainer
+
+            self.embedding_trainer = EmbeddingTrainer(
+                space=self.embedding_space, bus=self.bus,
+            )
+            self.corpus_stream = CorpusStream(
+                trainer=self.embedding_trainer, bus=self.bus,
+            )
+            # Background drain so queue submissions from chat / ingest
+            # never wedge the producer. Daemon thread dies with the process.
+            self._neural_trainer_thread = _threading.Thread(
+                target=self.embedding_trainer.run,
+                name="darwin-embedding-trainer",
+                daemon=True,
+            )
+            self._neural_trainer_thread.start()
+        except Exception:
+            self.embedding_trainer = None
+            self.corpus_stream = None
+            self._neural_trainer_thread = None
         self.divergence_probe.attach_bus(
             lambda report: self.bus.publish(
                 BusTopic.DIVERGENCE_REPORTS,

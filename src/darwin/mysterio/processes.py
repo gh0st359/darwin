@@ -115,7 +115,7 @@ DEFAULT_ROSTER: list[SubsystemSpec] = [
                   priority=40, topics=["narrative"]),
     SubsystemSpec("observer_modeler", "darwin.mysterio.processes:_heartbeat",
                   priority=40, topics=["observer_events"]),
-    SubsystemSpec("embedding_trainer", "darwin.mysterio.processes:_heartbeat",
+    SubsystemSpec("embedding_trainer", "darwin.neural.trainer:run_embedding_trainer",
                   priority=30, topics=["embedding_updates"]),
 ]
 

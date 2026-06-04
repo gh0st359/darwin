@@ -122,6 +122,7 @@ class IngestPipeline:
         return self._absorb_facts(result.facts, source=result.source)
 
     def _absorb_facts(self, facts: list[Fact], *, source: str) -> IngestStats:
+        chunk_sentences: list[str] = []
         for fact in facts:
             self.stats.facts_seen += 1
             key = (fact.subject, fact.predicate, fact.object)
@@ -132,11 +133,19 @@ class IngestPipeline:
                 self.stats.facts_skipped_dup += 1
                 continue
             self._seen.add(key)
+            # Collect the source sentence regardless of universe acceptance:
+            # the embedding space learns from every novel, well-formed fact,
+            # not only the ones the universe was able to store.
+            sentence = (fact.source_sentence or "").strip()
+            if sentence:
+                chunk_sentences.append(sentence)
             added = self._add_to_universe(fact)
             if added:
                 self.stats.facts_added += 1
                 self._activate_in_mesh(fact)
                 self._publish_fact(fact, source=source)
+        if chunk_sentences:
+            self._publish_corpus_chunk(chunk_sentences, source=source)
         self.stats.sources_processed += 1
         self._publish_progress(source, "")
         return self.stats
@@ -173,6 +182,24 @@ class IngestPipeline:
             self.bus.publish(
                 BusTopic.FACT_EXTRACTED,
                 {**fact.to_record(), "source": source},
+                source="ingest_pipeline",
+            )
+        except Exception:
+            return
+
+    def _publish_corpus_chunk(self, sentences: list[str], *, source: str) -> None:
+        if self.bus is None or not sentences:
+            return
+        try:
+            from darwin.mysterio.bus import BusTopic
+
+            self.bus.publish(
+                BusTopic.CORPUS_CHUNK,
+                {
+                    "text": "\n".join(sentences),
+                    "sentence_count": len(sentences),
+                    "source": source,
+                },
                 source="ingest_pipeline",
             )
         except Exception:

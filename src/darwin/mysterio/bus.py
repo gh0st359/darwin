@@ -59,6 +59,9 @@ class BusTopic(str, Enum):
     GOAL_SUBMITTED = "goal_submitted"
     GOAL_PROGRESS = "goal_progress"
     GOAL_COMPLETED = "goal_completed"
+    CORPUS_CHUNK = "corpus_chunk"
+    NEURAL_CHECKPOINT = "neural_checkpoint"
+    MIND_STEP = "mind_step"
 
 
 @dataclass
