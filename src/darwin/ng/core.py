@@ -5,6 +5,12 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
+from darwin.ng.awareness import AwarenessEngine
+from darwin.ng.curriculum import FrontierCurriculumEngine
+from darwin.ng.living_system import AutopoieticKernel
+from darwin.ng.research_program import ResearchProgramEngine
+from darwin.ng.strategic_cortex import StrategicCortex
+
 
 def _safe_call(obj: Any, name: str, default: Any = None, *args: Any, **kwargs: Any) -> Any:
     try:
@@ -103,6 +109,11 @@ class DarwinNGState:
     cognitive_stack: dict[str, Any]
     power_metrics: dict[str, Any]
     frontier_protocols: dict[str, Any]
+    research_program: dict[str, Any]
+    living_system: dict[str, Any]
+    frontier_curriculum: dict[str, Any]
+    awareness_system: dict[str, Any]
+    strategic_cortex: dict[str, Any]
     meta_learning: dict[str, Any]
     safety: SafetyAssessment
 
@@ -121,6 +132,11 @@ class DarwinNGState:
             "cognitive_stack": self.cognitive_stack,
             "power_metrics": self.power_metrics,
             "frontier_protocols": self.frontier_protocols,
+            "research_program": self.research_program,
+            "living_system": self.living_system,
+            "frontier_curriculum": self.frontier_curriculum,
+            "awareness_system": self.awareness_system,
+            "strategic_cortex": self.strategic_cortex,
             "meta_learning": self.meta_learning,
             "safety": self.safety.to_record(),
         }
@@ -915,6 +931,11 @@ class DarwinNG:
         self.knowledge = UniversalKnowledgeGraph()
         self.capability_manifest = CapabilityManifest()
         self.frontier_stack = FrontierCognitiveStack()
+        self.research_program = ResearchProgramEngine()
+        self.autopoiesis = AutopoieticKernel()
+        self.curriculum = FrontierCurriculumEngine()
+        self.awareness = AwarenessEngine()
+        self.strategic_cortex = StrategicCortex()
         self.meta = SelfImprovementMetaSystem()
         self._cycle_id = 0
 
@@ -945,6 +966,41 @@ class DarwinNG:
             capabilities=capabilities,
             meta_learning=meta,
         )
+        research_program = self.research_program.build(
+            workspace=workspace,
+            goals=goals,
+            capabilities=capabilities,
+            knowledge=knowledge,
+            frontier_protocols=frontier_protocols,
+            power_metrics=power_metrics,
+            meta_learning=meta,
+        )
+        living_system = self.autopoiesis.build(
+            workspace=workspace,
+            self_model=self_model,
+            knowledge=knowledge,
+            capabilities=capabilities,
+            power_metrics=power_metrics,
+            research_program=research_program,
+        )
+        frontier_curriculum = self.curriculum.build(
+            research_program=research_program,
+            living_system=living_system,
+            power_metrics=power_metrics,
+        )
+        awareness_system = self.awareness.build(
+            workspace=workspace,
+            self_model=self_model,
+            living_system=living_system,
+            frontier_curriculum=frontier_curriculum,
+        )
+        strategic_cortex = self.strategic_cortex.build(
+            capabilities=capabilities,
+            awareness_system=awareness_system,
+            living_system=living_system,
+            power_metrics=power_metrics,
+            frontier_curriculum=frontier_curriculum,
+        )
         state = DarwinNGState(
             cycle_id=self._cycle_id,
             created_at=time.time(),
@@ -959,6 +1015,11 @@ class DarwinNG:
             cognitive_stack=cognitive_stack,
             power_metrics=power_metrics,
             frontier_protocols=frontier_protocols,
+            research_program=research_program,
+            living_system=living_system,
+            frontier_curriculum=frontier_curriculum,
+            awareness_system=awareness_system,
+            strategic_cortex=strategic_cortex,
             meta_learning=meta,
             safety=cycle_safety,
         )

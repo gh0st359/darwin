@@ -582,8 +582,17 @@ class DarwinDaemon:
                 "all",
             }
             show_frontier = subcommand in {"frontier", "stack", "power"}
+            show_lab = subcommand in {"lab", "research", "program"}
+            show_life = subcommand in {"life", "living", "autopoiesis"}
+            show_curriculum = subcommand in {"curriculum", "training", "benchmarks"}
+            show_awareness = subcommand in {"awareness", "consciousness", "metacognition"}
+            show_strategy = subcommand in {"strategy", "cortex", "strategic"}
             activate = subcommand in {"activate", "self-direct"}
-            skip = 2 if (show_capabilities or show_frontier or activate) else 1
+            skip = 2 if (
+                show_capabilities or show_frontier or show_lab
+                or show_life or show_curriculum or show_awareness
+                or show_strategy or activate
+            ) else 1
             stimulus = " ".join(parts[skip:]) or None
             if hasattr(runtime, "run_ng_cycle"):
                 state = runtime.run_ng_cycle(stimulus=stimulus)
@@ -669,6 +678,125 @@ class DarwinDaemon:
                         out.append(f"  - {key}: {len(value)} item(s)")
                     else:
                         out.append(f"  - {key}: {value}")
+                return out
+            if show_lab:
+                program = record["research_program"]
+                out = [
+                    "Darwin NG research program:",
+                    f"scale={program['scale']} emergence={program['emergence_index']:.2f}",
+                    f"active_engines={len(program['active_engines'])}",
+                    f"processes={program['cognitive_operating_system']['process_count']}",
+                    f"experiments={program['recursive_improvement_lab']['experiment_count']}",
+                    f"simulations={program['world_simulation_lab']['simulation_count']}",
+                    f"distributed_nodes={program['distributed_lab']['node_count']}",
+                    f"benchmarks={program['evaluation_lab']['benchmark_count']}",
+                    f"roadmap_phases={program['roadmap']['phase_count']}",
+                    "top experiments:",
+                ]
+                for exp in program["recursive_improvement_lab"]["experiments"][:6]:
+                    out.append(
+                        f"  - {exp['domain']}: {exp['hypothesis']} "
+                        f"measure={exp['measurement']}"
+                    )
+                out.append("roadmap:")
+                for phase in program["roadmap"]["phases"][:8]:
+                    out.append(f"  - P{phase['phase']} {phase['name']}: {phase['objective']}")
+                return out
+            if show_life:
+                living = record["living_system"]
+                out = [
+                    "Darwin NG living system:",
+                    f"kernel={living['kernel']} viability={living['viability_index']:.2f}",
+                    f"homeostasis_variables={living['homeostasis']['variable_count']} "
+                    f"stability={living['homeostasis']['stability']:.2f}",
+                    f"energy_budget={living['metabolism']['energy_budget']:.2f} "
+                    f"reserve={living['metabolism']['reserve']:.2f}",
+                    f"needs={living['needs']['need_count']} "
+                    f"dominant={living['needs']['dominant_need']}",
+                    f"continuity={living['identity']['continuity_score']:.2f}",
+                    f"repair_loops={living['repair']['repair_loop_count']}",
+                    "growth vectors:",
+                ]
+                for vector in living["growth"]["growth_vectors"][:8]:
+                    out.append(
+                        f"  - {vector['name']}: priority={vector['priority']:.2f} "
+                        f"target={vector['target']:.2f}"
+                    )
+                out.append("highest repair loops:")
+                for loop in living["repair"]["loops"][:6]:
+                    out.append(
+                        f"  - {loop['name']}: urgency={loop['urgency']:.2f} "
+                        f"action={loop['action']}"
+                    )
+                return out
+            if show_curriculum:
+                curriculum = record["frontier_curriculum"]
+                out = [
+                    "Darwin NG frontier curriculum:",
+                    f"tasks={curriculum['task_count']} "
+                    f"ladder_rungs={curriculum['benchmark_ladder']['rung_count']} "
+                    f"cycles_per_epoch={curriculum['training_regimen']['cycles_per_epoch']}",
+                    "domains:",
+                ]
+                for name, domain in curriculum["domains"].items():
+                    out.append(
+                        f"  - {name}: tasks={domain['task_count']} "
+                        f"dominant_metric={domain['dominant_metric']}"
+                    )
+                out.append("benchmark ladder:")
+                for rung in curriculum["benchmark_ladder"]["rungs"][:8]:
+                    out.append(
+                        f"  - L{rung['level']} {rung['name']} "
+                        f"threshold={rung['promotion_threshold']}"
+                    )
+                out.append("adversarial probes:")
+                for probe in curriculum["adversarial_probes"][:6]:
+                    out.append(f"  - {probe['name']}: {probe['challenge']}")
+                return out
+            if show_awareness:
+                awareness = record["awareness_system"]
+                out = [
+                    "Darwin NG awareness system:",
+                    f"mode={awareness['mode']} index={awareness['awareness_index']:.2f}",
+                    f"scenes={awareness['attention_theater']['scene_count']} "
+                    f"observers={awareness['metacognition']['observer_count']} "
+                    f"questions={awareness['introspection_protocol']['question_count']}",
+                    "attention scenes:",
+                ]
+                for scene in awareness["attention_theater"]["scenes"][:8]:
+                    out.append(
+                        f"  - {scene['name']}: salience={scene['salience']:.2f} "
+                        f"focus={scene['focus']}"
+                    )
+                out.append("meta-observers:")
+                for observer in awareness["metacognition"]["observers"][:6]:
+                    out.append(
+                        f"  - {observer['name']}: watches={observer['watches']} "
+                        f"repair={observer['repair']}"
+                    )
+                return out
+            if show_strategy:
+                strategy = record["strategic_cortex"]
+                out = [
+                    "Darwin NG strategic cortex:",
+                    f"mode={strategy['mode']} power={strategy['strategic_power_index']:.2f}",
+                    f"objectives={strategy['objective_count']} "
+                    f"capabilities={strategy['capability_portfolio']['capability_count']} "
+                    f"policies={strategy['action_policy']['policy_count']} "
+                    f"council={strategy['agent_council']['member_count']}",
+                    "top objectives:",
+                ]
+                for objective in strategy["objectives"][:8]:
+                    out.append(
+                        f"  - {objective['name']}: priority={objective['priority']:.2f} "
+                        f"metric={objective['metric']}"
+                    )
+                out.append("campaigns:")
+                for campaign in strategy["campaigns"][:6]:
+                    out.append(
+                        f"  - {campaign['objective']} via {campaign['primary_capability']} "
+                        f"win={campaign['definition_of_win']}"
+                    )
                 return out
             workspace = record["workspace"]
             safety = record["safety"]
