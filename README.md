@@ -16,8 +16,8 @@ relations between them; the rest is ingested or learned from use.
 
 The current head of `claude/darwin-mysterio-plan-07Sqx` is the
 **V-Mesh → V-Scale → Darwin NG** release on top of the prior v9 substrate. Test count:
-**897 passing** (+ 4 properly skipped without numpy/torch/faiss). Source: ~36K
-LOC across 174 modules; tests: ~12.5K LOC across 140 modules.
+**900 passing** (+ 4 properly skipped without numpy/torch/faiss). Source: ~36.6K
+LOC across 174 modules; tests: ~12.6K LOC across 140 modules.
 
 ## What this is — and what it isn't (be honest)
 
@@ -41,8 +41,11 @@ What it is, today, on this branch:
 * Darwin NG: an integrated self-directed cognitive stack that fuses the
   universe, reasoning trace, cortical mesh, learned embeddings, tiered memory,
   autonomy, operator stimulus, and self-modification telemetry into a global
-  workspace with intrinsic drives, generated goals, plans, meta-learning
-  hypotheses, and auditable governance. Inspect it with `darwin inspect /ng`.
+  workspace with intrinsic drives, generated goals, executable plans, power
+  metrics, frontier protocols, recursive self-improvement agenda, embodied
+  affordances, theory-of-mind state, and durable goal activation. Inspect it
+  with `darwin inspect /ng`, `/ng frontier`, `/ng capabilities`, and
+  `/ng activate`.
 * Real (not metadata-only) self-modification integrity checks via
   `TouchRecorder` — undeclared writes to declared targets raise the existing
   `ContainmentError` API, making mutations explicit and reversible.

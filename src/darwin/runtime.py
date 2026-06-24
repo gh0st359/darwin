@@ -1140,6 +1140,12 @@ class DarwinRuntime:
             self.last_ng_state = state
             return state
 
+    def activate_ng_autonomy(self, limit: int = 2) -> dict[str, Any]:
+        with self._lock:
+            state = self.last_ng_state or self.ng.cycle(self)
+            self.last_ng_state = state
+            return self.ng.activate_autonomy(self, state=state, limit=limit)
+
     # -- conversation ----------------------------------------------------
 
     def chat(self, message: str, user_id: str | None = None) -> str:

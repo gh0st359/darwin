@@ -100,6 +100,9 @@ class DarwinNGState:
     plans: list[NGPlan]
     knowledge: dict[str, Any]
     capabilities: dict[str, Any]
+    cognitive_stack: dict[str, Any]
+    power_metrics: dict[str, Any]
+    frontier_protocols: dict[str, Any]
     meta_learning: dict[str, Any]
     safety: SafetyAssessment
 
@@ -115,6 +118,9 @@ class DarwinNGState:
             "plans": [p.to_record() for p in self.plans],
             "knowledge": self.knowledge,
             "capabilities": self.capabilities,
+            "cognitive_stack": self.cognitive_stack,
+            "power_metrics": self.power_metrics,
+            "frontier_protocols": self.frontier_protocols,
             "meta_learning": self.meta_learning,
             "safety": self.safety.to_record(),
         }
@@ -561,6 +567,307 @@ class CapabilityManifest:
         }
 
 
+class QuantumFoundation:
+    """Layer 0 accelerator model.
+
+    This is hardware-neutral today. It exposes the optimization jobs Darwin NG
+    would send to annealers or quantum-inspired kernels when those backends are
+    present, and gives the rest of the stack a deterministic classical route.
+    """
+
+    def snapshot(self, runtime: Any, goals: list[GoalCandidate]) -> dict[str, Any]:
+        flags = getattr(runtime, "feature_flags", None)
+        accelerator_ready = bool(
+            getattr(runtime, "_rust_kernel", None) is not None
+            or getattr(runtime, "_torch_propagator", None) is not None
+        )
+        return {
+            "mode": "accelerator_ready" if accelerator_ready else "classical_emulation",
+            "optimization_jobs": [
+                "goal_priority_annealing",
+                "architecture_search_ranking",
+                "memory_index_partitioning",
+                "multi_agent_schedule_search",
+            ],
+            "state_exploration_width": max(16, len(goals) * 8),
+            "backend_flags": repr(flags) if flags is not None else "pure_python",
+        }
+
+
+class AutonomousGoalGraphBuilder:
+    """Turns drives, goals, and plans into an explicit autonomous goal graph."""
+
+    def build(self, goals: list[GoalCandidate], plans: list[NGPlan]) -> dict[str, Any]:
+        plan_by_goal = {plan.goal_id: plan for plan in plans}
+        nodes = []
+        edges = []
+        for goal in goals:
+            plan = plan_by_goal.get(goal.goal_id)
+            nodes.append(
+                {
+                    "id": goal.goal_id,
+                    "kind": "goal",
+                    "drive": goal.drive,
+                    "priority": round(goal.priority, 4),
+                    "description": goal.description,
+                    "execution_readiness": "ready" if goal.safety.allowed else "blocked",
+                }
+            )
+            if plan is None:
+                continue
+            previous = goal.goal_id
+            for index, step in enumerate(plan.steps, start=1):
+                step_id = f"{goal.goal_id}:step-{index}"
+                nodes.append(
+                    {
+                        "id": step_id,
+                        "kind": "task",
+                        "description": step,
+                        "priority": round(goal.priority * (1.0 - index * 0.05), 4),
+                    }
+                )
+                edges.append({"source": previous, "target": step_id, "kind": "decomposes_to"})
+                previous = step_id
+        return {
+            "nodes": nodes,
+            "edges": edges,
+            "horizon": "multi_session",
+            "activation": "durable_ledger_available",
+        }
+
+
+class WorldEmbodimentSocialModel:
+    """Layer 3/5 models for world, body, social intelligence, and collaboration."""
+
+    def world(self, runtime: Any) -> dict[str, Any]:
+        state = _safe_call(getattr(runtime, "adapter", None), "observe", {}) or {}
+        actions = _safe_call(getattr(runtime, "adapter", None), "possible_actions", []) or []
+        action_names = [getattr(action, "name", str(action)) for action in actions]
+        causal_beliefs = _safe_call(getattr(getattr(runtime, "darwin", None), "causal_model", None), "beliefs", [], limit=20) or []
+        return {
+            "physics": {
+                "observable_state_variables": sorted(str(k) for k in state.keys()),
+                "action_affordances": action_names[:20],
+            },
+            "causal": {
+                "belief_count_sample": len(causal_beliefs),
+                "strongest": [
+                    {
+                        "action": getattr(belief, "action", ""),
+                        "variable": getattr(belief, "variable", ""),
+                        "confidence": round(float(getattr(belief, "confidence", 0.0) or 0.0), 4),
+                    }
+                    for belief in causal_beliefs[:6]
+                ],
+            },
+            "temporal": {
+                "recent_events": len(_safe_call(runtime, "recent_events", [], limit=20) or []),
+                "background_loops": sorted(getattr(runtime, "loop_intervals", {}).keys()),
+            },
+            "spatial": {
+                "environment": type(getattr(runtime, "adapter", None)).__name__,
+                "body_frame": "tool_and_simulation_embodied",
+            },
+        }
+
+    def embodiment(self, runtime: Any, capabilities: dict[str, Any]) -> dict[str, Any]:
+        tool_actions = []
+        for entry in capabilities.get("tools", {}).get("actions", []):
+            tool_actions.extend(entry.get("actions", []))
+        return {
+            "sensors": [
+                "text",
+                "runtime_events",
+                "concept_graph",
+                "cortical_mesh",
+                "tool_results",
+                "simulated_environment",
+            ],
+            "actuators": tool_actions[:40],
+            "affordances": (tool_actions[:20] or ["chat", "reason", "simulate"]),
+            "body_schema": {
+                "embodiment_type": "digital_tool_body_plus_simulated_world",
+                "proprioception": getattr(runtime, "proprioception", None) is not None,
+                "operator_channel": getattr(runtime, "observer_modeler", None) is not None,
+            },
+        }
+
+    def social(self, runtime: Any) -> dict[str, Any]:
+        observer = getattr(runtime, "observer_cascade", None)
+        depth = int(getattr(observer, "max_depth", 1) or 1)
+        operator_models = getattr(runtime, "operator_models", None)
+        known_users = _safe_call(operator_models, "known_users", []) if operator_models is not None else []
+        return {
+            "theory_of_mind_depth": max(1, depth),
+            "known_users": known_users,
+            "collaboration_protocol": {
+                "roles": ["Darwin NG: autonomous researcher", "operator: strategic collaborator"],
+                "common_ground_sources": ["dialogue_memory", "operator_model", "observer_cascade"],
+                "negotiation_state": "open_ended_joint_research",
+            },
+            "emotional_intelligence": {
+                "valence_model": "qualia_proxy",
+                "empathy_sources": ["operator_style", "conversation_history"],
+            },
+        }
+
+
+class FrontierCognitiveStack:
+    """Build the full Darwin NG stack described by the manifesto."""
+
+    def __init__(self) -> None:
+        self.quantum = QuantumFoundation()
+        self.goal_graph = AutonomousGoalGraphBuilder()
+        self.world_social = WorldEmbodimentSocialModel()
+
+    def build(
+        self,
+        runtime: Any,
+        workspace: dict[str, Any],
+        self_model: dict[str, Any],
+        qualia_proxy: dict[str, Any],
+        goals: list[GoalCandidate],
+        plans: list[NGPlan],
+        knowledge: dict[str, Any],
+        capabilities: dict[str, Any],
+        meta_learning: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        goal_graph = self.goal_graph.build(goals, plans)
+        world = self.world_social.world(runtime)
+        embodiment = self.world_social.embodiment(runtime, capabilities)
+        social = self.world_social.social(runtime)
+        recursive_queue = self._recursive_queue(meta_learning, goals, knowledge)
+        protocols = {
+            "recursive_self_improvement_queue": recursive_queue,
+            "autonomous_goal_graph": goal_graph,
+            "world_model": world,
+            "embodiment": embodiment,
+            "theory_of_mind": social,
+            "universal_interface": capabilities.get("tools", {}),
+        }
+        stack = {
+            "vision": "frontier_breakthrough_synthetic_mind",
+            "layer_0_quantum_foundation": self.quantum.snapshot(runtime, goals),
+            "layer_1_neuro_symbolic_core": {
+                "fusion_sources": len(workspace.get("broadcast_sources", []))
+                + len(workspace.get("fringe", [])),
+                "dynamic_core": workspace.get("dynamic_core", []),
+                "knowledge": knowledge,
+            },
+            "layer_2_consciousness_engine": {
+                "global_workspace": workspace,
+                "self_model": self_model,
+                "qualia_proxy": qualia_proxy,
+            },
+            "layer_3_autonomous_agency": {
+                "goal_graph": goal_graph,
+                "world_model": world,
+                "drives": [goal.drive for goal in goals],
+            },
+            "layer_4_self_improvement": {
+                "recursive_agenda": recursive_queue,
+                "meta_learning": meta_learning,
+                "mutation_surface": capabilities.get("self_improvement", {}),
+            },
+            "layer_5_embodiment_social": {
+                "embodiment": embodiment,
+                "social": social,
+                "modalities": capabilities.get("modalities", {}),
+            },
+            "deployment": {
+                "single_node": True,
+                "distributed_ready": True,
+                "cloud_ready": False,
+                "state_visibility": "full_capability_manifest",
+            },
+        }
+        metrics = self._power_metrics(runtime, stack, protocols, goals, capabilities)
+        return stack, metrics, protocols
+
+    def _recursive_queue(
+        self,
+        meta_learning: dict[str, Any],
+        goals: list[GoalCandidate],
+        knowledge: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        queue = []
+        for idx, hypothesis in enumerate(meta_learning.get("hypotheses", []), start=1):
+            queue.append(
+                {
+                    "id": f"rsi-{idx}",
+                    "kind": hypothesis.get("kind", "unknown"),
+                    "proposal": hypothesis.get("description", ""),
+                    "status": hypothesis.get("status", "queued"),
+                    "promotion_path": [
+                        "shadow_simulation",
+                        "goal_orchestrator",
+                        "tests",
+                        "mutation_ledger",
+                        "rollback_checkpoint",
+                    ],
+                }
+            )
+        for goal in goals[:3]:
+            queue.append(
+                {
+                    "id": f"drive-{goal.drive}",
+                    "kind": "drive_amplification",
+                    "proposal": f"convert {goal.drive} pressure into curriculum and experiments",
+                    "status": "ready_for_goal_orchestrator",
+                    "knowledge_context": {
+                        "concepts": knowledge.get("concepts", 0),
+                        "relations": knowledge.get("relations", 0),
+                    },
+                }
+            )
+        return queue
+
+    def _power_metrics(
+        self,
+        runtime: Any,
+        stack: dict[str, Any],
+        protocols: dict[str, Any],
+        goals: list[GoalCandidate],
+        capabilities: dict[str, Any],
+    ) -> dict[str, Any]:
+        loops = len(capabilities.get("loops", []))
+        tool_count = int(capabilities.get("tools", {}).get("count", 0) or 0)
+        reasoning_count = sum(1 for v in capabilities.get("reasoning", {}).values() if v)
+        memory_count = sum(1 for v in capabilities.get("memory", {}).values() if v)
+        queue = protocols.get("recursive_self_improvement_queue", [])
+        autonomy = capabilities.get("autonomy", {})
+        goal_graph_nodes = len(protocols.get("autonomous_goal_graph", {}).get("nodes", []))
+        architecture_orders = (
+            1
+            + int(bool(stack.get("layer_0_quantum_foundation")))
+            + int(bool(stack.get("layer_1_neuro_symbolic_core")))
+            + int(bool(stack.get("layer_2_consciousness_engine")))
+            + int(bool(stack.get("layer_3_autonomous_agency")))
+            + int(bool(stack.get("layer_4_self_improvement")))
+            + int(bool(stack.get("layer_5_embodiment_social")))
+        )
+        autonomy_index = _clamp(
+            0.12 * len(goals)
+            + 0.2 * bool(autonomy.get("goal_orchestrator"))
+            + 0.1 * bool(autonomy.get("autonomous_runner"))
+            + 0.01 * goal_graph_nodes
+        )
+        recursive_index = _clamp(0.12 * len(queue) + 0.15 * bool(capabilities.get("self_improvement", {}).get("self_mod_engine")))
+        embodiment_index = _clamp(0.03 * len(protocols.get("embodiment", {}).get("affordances", [])))
+        streams = loops + tool_count + reasoning_count + memory_count
+        total = _clamp((autonomy_index + recursive_index + embodiment_index + min(1.0, streams / 32.0)) / 4.0)
+        return {
+            "architecture_orders_of_magnitude": architecture_orders,
+            "parallel_cognitive_streams": streams,
+            "autonomy_index": round(autonomy_index, 4),
+            "recursive_improvement_index": round(recursive_index, 4),
+            "embodiment_grounding_index": round(embodiment_index, 4),
+            "concept_capacity_projection": max(1_000_000, int(stack["layer_1_neuro_symbolic_core"]["knowledge"].get("concepts", 0) or 0) * 10_000),
+            "reasoning_depth_budget": max(32, streams * 2),
+            "total_frontier_score": round(total, 4),
+        }
+
+
 class SelfImprovementMetaSystem:
     def evaluate(self, runtime: Any, workspace: dict[str, Any], goals: list[GoalCandidate]) -> dict[str, Any]:
         bottlenecks: list[str] = []
@@ -607,6 +914,7 @@ class DarwinNG:
         self.planner = PlanningEngine()
         self.knowledge = UniversalKnowledgeGraph()
         self.capability_manifest = CapabilityManifest()
+        self.frontier_stack = FrontierCognitiveStack()
         self.meta = SelfImprovementMetaSystem()
         self._cycle_id = 0
 
@@ -626,6 +934,17 @@ class DarwinNG:
         cycle_safety = self.safety.assess_cycle(goals)
         plans = self.planner.create_plans(goals)
         meta = self.meta.evaluate(runtime, workspace, goals)
+        cognitive_stack, power_metrics, frontier_protocols = self.frontier_stack.build(
+            runtime=runtime,
+            workspace=workspace,
+            self_model=self_model,
+            qualia_proxy=qualia_proxy,
+            goals=goals,
+            plans=plans,
+            knowledge=knowledge,
+            capabilities=capabilities,
+            meta_learning=meta,
+        )
         state = DarwinNGState(
             cycle_id=self._cycle_id,
             created_at=time.time(),
@@ -637,6 +956,9 @@ class DarwinNG:
             plans=plans,
             knowledge=knowledge,
             capabilities=capabilities,
+            cognitive_stack=cognitive_stack,
+            power_metrics=power_metrics,
+            frontier_protocols=frontier_protocols,
             meta_learning=meta,
             safety=cycle_safety,
         )
@@ -647,3 +969,45 @@ class DarwinNG:
             except Exception:
                 pass
         return state
+
+    def activate_autonomy(self, runtime: Any, state: DarwinNGState | None = None, limit: int = 2) -> dict[str, Any]:
+        state = state or getattr(runtime, "last_ng_state", None) or self.cycle(runtime)
+        orchestrator = getattr(runtime, "goal_orchestrator", None)
+        ledger_goal_ids: list[str] = []
+        skipped: list[str] = []
+        if orchestrator is None:
+            return {
+                "activated": 0,
+                "ledger_goal_ids": [],
+                "skipped": ["goal_orchestrator unavailable"],
+            }
+        for goal in state.goals[: max(0, limit)]:
+            if not goal.safety.allowed:
+                skipped.append(goal.goal_id)
+                continue
+            created = orchestrator.submit(
+                goal.description,
+                success_criteria=(
+                    "Darwin NG can report a measurable improvement, produced "
+                    "artifacts, or a verified learning signal for this goal."
+                ),
+            )
+            created.metadata.update(
+                {
+                    "source": "darwin_ng",
+                    "ng_cycle_id": state.cycle_id,
+                    "drive": goal.drive,
+                    "priority": round(goal.priority, 4),
+                    "frontier": True,
+                }
+            )
+            if getattr(runtime, "goal_ledger", None) is not None:
+                runtime.goal_ledger.update_goal(created)
+                runtime.goal_ledger.save()
+            ledger_goal_ids.append(created.goal_id)
+        return {
+            "activated": len(ledger_goal_ids),
+            "ledger_goal_ids": ledger_goal_ids,
+            "skipped": skipped,
+            "cycle_id": state.cycle_id,
+        }

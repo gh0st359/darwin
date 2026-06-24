@@ -574,13 +574,17 @@ class DarwinDaemon:
             ng = getattr(runtime, "ng", None)
             if ng is None:
                 return ["Darwin NG is not active"]
-            show_capabilities = len(parts) > 1 and parts[1].lower() in {
+            subcommand = parts[1].lower() if len(parts) > 1 else ""
+            show_capabilities = subcommand in {
                 "capabilities",
                 "capability",
                 "surface",
                 "all",
             }
-            stimulus = " ".join(parts[2:] if show_capabilities else parts[1:]) or None
+            show_frontier = subcommand in {"frontier", "stack", "power"}
+            activate = subcommand in {"activate", "self-direct"}
+            skip = 2 if (show_capabilities or show_frontier or activate) else 1
+            stimulus = " ".join(parts[skip:]) or None
             if hasattr(runtime, "run_ng_cycle"):
                 state = runtime.run_ng_cycle(stimulus=stimulus)
             else:
@@ -588,6 +592,21 @@ class DarwinDaemon:
             if state is None:
                 return ["Darwin NG has not produced a state yet"]
             record = state.to_record()
+            if activate:
+                report = (
+                    runtime.activate_ng_autonomy()
+                    if hasattr(runtime, "activate_ng_autonomy")
+                    else {"activated": 0, "ledger_goal_ids": [], "skipped": ["activation unavailable"]}
+                )
+                out = [
+                    "Darwin NG autonomy activation:",
+                    f"activated={report['activated']} cycle={report.get('cycle_id', record['cycle_id'])}",
+                ]
+                for goal_id in report.get("ledger_goal_ids", []):
+                    out.append(f"  + durable goal: {goal_id}")
+                for skipped in report.get("skipped", []):
+                    out.append(f"  - skipped: {skipped}")
+                return out
             if show_capabilities:
                 caps = record["capabilities"]
                 out = [
@@ -620,6 +639,36 @@ class DarwinDaemon:
                 out.append("scale:")
                 for key, value in caps["scale"].items():
                     out.append(f"  - {key}: {value}")
+                return out
+            if show_frontier:
+                stack = record["cognitive_stack"]
+                metrics = record["power_metrics"]
+                protocols = record["frontier_protocols"]
+                out = [
+                    "Darwin NG frontier stack:",
+                    f"vision={stack['vision']}",
+                    f"layer0={stack['layer_0_quantum_foundation']['mode']} "
+                    f"width={stack['layer_0_quantum_foundation']['state_exploration_width']}",
+                    f"layer1 fusion_sources={stack['layer_1_neuro_symbolic_core']['fusion_sources']} "
+                    f"concept_projection={metrics['concept_capacity_projection']}",
+                    f"layer2 phi={stack['layer_2_consciousness_engine']['global_workspace']['phi_proxy']:.2f} "
+                    f"introspection_depth={stack['layer_2_consciousness_engine']['self_model']['introspection_depth']}",
+                    f"layer3 goal_nodes={len(stack['layer_3_autonomous_agency']['goal_graph']['nodes'])}",
+                    f"layer4 recursive_items={len(stack['layer_4_self_improvement']['recursive_agenda'])}",
+                    f"layer5 affordances={len(stack['layer_5_embodiment_social']['embodiment']['affordances'])} "
+                    f"tom_depth={stack['layer_5_embodiment_social']['social']['theory_of_mind_depth']}",
+                    "power metrics:",
+                ]
+                for key, value in metrics.items():
+                    out.append(f"  - {key}: {value}")
+                out.append("frontier protocols:")
+                for key, value in protocols.items():
+                    if isinstance(value, dict):
+                        out.append(f"  - {key}: {len(value)} field(s)")
+                    elif isinstance(value, list):
+                        out.append(f"  - {key}: {len(value)} item(s)")
+                    else:
+                        out.append(f"  - {key}: {value}")
                 return out
             workspace = record["workspace"]
             safety = record["safety"]

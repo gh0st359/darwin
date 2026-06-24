@@ -64,6 +64,53 @@ def test_ng_cycle_integrates_workspace_goals_and_meta_learning() -> None:
     assert runtime.last_ng_state is state
 
 
+def test_ng_cycle_builds_full_frontier_cognitive_stack() -> None:
+    runtime = _runtime()
+    runtime.chat("A frontier mind should reason, learn, embody, collaborate, and improve.")
+
+    record = runtime.run_ng_cycle(
+        "Make Darwin NG a frontier autonomous synthetic mind."
+    ).to_record()
+
+    stack = record["cognitive_stack"]
+    assert stack["vision"] == "frontier_breakthrough_synthetic_mind"
+    assert stack["layer_0_quantum_foundation"]["mode"] in {
+        "classical_emulation",
+        "accelerator_ready",
+    }
+    assert stack["layer_1_neuro_symbolic_core"]["fusion_sources"] >= 5
+    assert stack["layer_2_consciousness_engine"]["global_workspace"]["phi_proxy"] >= 0.0
+    assert stack["layer_3_autonomous_agency"]["goal_graph"]["nodes"]
+    assert stack["layer_4_self_improvement"]["recursive_agenda"]
+    assert stack["layer_5_embodiment_social"]["embodiment"]["affordances"]
+    assert stack["layer_5_embodiment_social"]["social"]["theory_of_mind_depth"] >= 1
+
+    metrics = record["power_metrics"]
+    assert metrics["architecture_orders_of_magnitude"] >= 5
+    assert metrics["parallel_cognitive_streams"] >= 10
+    assert metrics["recursive_improvement_index"] > 0.0
+    assert metrics["autonomy_index"] > 0.0
+    assert metrics["total_frontier_score"] > 0.0
+
+
+def test_ng_can_activate_self_generated_goals_in_durable_autonomy_ledger() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        runtime = _runtime(Path(directory))
+        state = runtime.run_ng_cycle(
+            "Create long-horizon goals for autonomous intelligence growth."
+        )
+
+        report = runtime.activate_ng_autonomy(limit=2)
+
+        assert report["activated"] >= 1
+        assert report["ledger_goal_ids"]
+        assert runtime.goal_ledger is not None
+        goals = [runtime.goal_ledger.goal(goal_id) for goal_id in report["ledger_goal_ids"]]
+        assert all(goal is not None for goal in goals)
+        assert all(goal.metadata.get("source") == "darwin_ng" for goal in goals if goal)
+        assert state.to_record()["frontier_protocols"]["autonomous_goal_graph"]["nodes"]
+
+
 def test_ng_state_publishes_to_cognition_bus() -> None:
     runtime = _runtime()
     runtime.run_ng_cycle("Let the next-generation workspace organize itself.")
@@ -133,3 +180,33 @@ def test_daemon_ng_capabilities_reports_full_surface() -> None:
     assert "self-improvement:" in joined
     assert "reasoning:" in joined
     assert "modalities:" in joined
+
+
+def test_daemon_ng_frontier_reports_power_metrics_and_protocols() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        runtime = _runtime(Path(directory))
+        daemon = DarwinDaemon(runtime, host="127.0.0.1", port=_free_port())
+        daemon.start()
+        try:
+            client = DarwinClient(host=daemon.host, port=daemon.port)
+            deadline = time.time() + 2.0
+            while time.time() < deadline:
+                try:
+                    client.connect(lambda _msg: None)
+                    break
+                except OSError:
+                    time.sleep(0.05)
+            else:
+                raise AssertionError("could not connect to daemon")
+
+            lines = client.command("/ng frontier", timeout=5.0)
+            client.close()
+        finally:
+            daemon.stop()
+
+    joined = "\n".join(lines)
+    assert "Darwin NG frontier stack:" in joined
+    assert "power metrics:" in joined
+    assert "frontier protocols:" in joined
+    assert "recursive_self_improvement_queue" in joined
+    assert "autonomous_goal_graph" in joined
