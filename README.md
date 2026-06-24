@@ -15,9 +15,9 @@ structural seed (thing, change, cause, same, different, infer, …) plus the
 relations between them; the rest is ingested or learned from use.
 
 The current head of `claude/darwin-mysterio-plan-07Sqx` is the
-**V-Mesh → V-Scale** release on top of the prior v9 substrate. Test count:
-**766 passing** (+ 2 properly skipped without torch/faiss). Source: ~31K
-LOC across 153 modules; tests: ~10.7K LOC across 115 modules.
+**V-Mesh → V-Scale → Darwin NG** release on top of the prior v9 substrate. Test count:
+**897 passing** (+ 4 properly skipped without numpy/torch/faiss). Source: ~36K
+LOC across 174 modules; tests: ~12.5K LOC across 140 modules.
 
 ## What this is — and what it isn't (be honest)
 
@@ -38,9 +38,14 @@ What it is, today, on this branch:
   fixtures aren't present.
 * Optional torch / FAISS / Rust / multiprocess backends behind feature
   flags. Pure-Python is the reference.
-* Real (not metadata-only) self-modification containment via
-  `TouchRecorder` — undeclared writes to declared targets raise
-  `ContainmentError`.
+* Darwin NG: an integrated self-directed cognitive stack that fuses the
+  universe, reasoning trace, cortical mesh, learned embeddings, tiered memory,
+  autonomy, operator stimulus, and self-modification telemetry into a global
+  workspace with intrinsic drives, generated goals, plans, meta-learning
+  hypotheses, and auditable governance. Inspect it with `darwin inspect /ng`.
+* Real (not metadata-only) self-modification integrity checks via
+  `TouchRecorder` — undeclared writes to declared targets raise the existing
+  `ContainmentError` API, making mutations explicit and reversible.
 * A hardened code-execution sandbox: static-AST denylist of dangerous
   imports/calls, rlimit-capped subprocess, optional bubblewrap /
   firejail / nsjail wrapper via `DARWIN_SANDBOX_BACKEND`. Terminal tool

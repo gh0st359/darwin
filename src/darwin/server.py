@@ -570,6 +570,101 @@ class DarwinDaemon:
                     f"conf={belief['confidence']:.2f} n={belief['samples']}"
                 )
             return out
+        if head == "/ng":
+            ng = getattr(runtime, "ng", None)
+            if ng is None:
+                return ["Darwin NG is not active"]
+            show_capabilities = len(parts) > 1 and parts[1].lower() in {
+                "capabilities",
+                "capability",
+                "surface",
+                "all",
+            }
+            stimulus = " ".join(parts[2:] if show_capabilities else parts[1:]) or None
+            if hasattr(runtime, "run_ng_cycle"):
+                state = runtime.run_ng_cycle(stimulus=stimulus)
+            else:
+                state = getattr(runtime, "last_ng_state", None)
+            if state is None:
+                return ["Darwin NG has not produced a state yet"]
+            record = state.to_record()
+            if show_capabilities:
+                caps = record["capabilities"]
+                out = [
+                    "Darwin NG capability manifest:",
+                    f"mode={caps['mode']}",
+                    f"principle: {caps['principle']}",
+                    "loops: " + ", ".join(caps["loops"]),
+                    f"tools ({caps['tools']['count']}):",
+                ]
+                for entry in caps["tools"]["actions"]:
+                    out.append(
+                        f"  - {entry['tool']}: "
+                        + ", ".join(entry["actions"])
+                    )
+                out.append("autonomy:")
+                for key, value in caps["autonomy"].items():
+                    out.append(f"  - {key}: {value}")
+                out.append("self-improvement:")
+                for key, value in caps["self_improvement"].items():
+                    out.append(f"  - {key}: {value}")
+                out.append("reasoning:")
+                for key, value in caps["reasoning"].items():
+                    out.append(f"  - {key}: {value}")
+                out.append("memory:")
+                for key, value in caps["memory"].items():
+                    out.append(f"  - {key}: {value}")
+                out.append("modalities:")
+                for key, value in caps["modalities"].items():
+                    out.append(f"  - {key}: {value}")
+                out.append("scale:")
+                for key, value in caps["scale"].items():
+                    out.append(f"  - {key}: {value}")
+                return out
+            workspace = record["workspace"]
+            safety = record["safety"]
+            out = [
+                f"Darwin NG cycle={record['cycle_id']} "
+                f"phi={workspace['phi_proxy']:.2f} "
+                f"governance={safety['governance_level']} "
+                f"allowed={safety['allowed']}",
+                f"report: {workspace['report']}",
+                "dynamic core:",
+            ]
+            for item in workspace["dynamic_core"][:5]:
+                out.append(
+                    f"  - {item['label']} from {item['source']} "
+                    f"salience={item['salience']:.2f}"
+                )
+            out.append("drives:")
+            for drive, value in sorted(record["drives"].items(), key=lambda kv: -kv[1]):
+                out.append(f"  - {drive}: {value:.2f}")
+            out.append("self-directed goals:")
+            for goal in record["goals"][:4]:
+                out.append(
+                    f"  - [{goal['drive']}] {goal['description']} "
+                    f"priority={goal['priority']:.2f} "
+                    f"gov={goal['safety']['governance_level']}"
+                )
+            out.append("plans:")
+            for plan in record["plans"][:3]:
+                out.append(f"  - {plan['goal_id']}: " + " -> ".join(plan["steps"][:3]))
+            out.append(
+                "knowledge: "
+                f"concepts={record['knowledge']['concepts']} "
+                f"relations={record['knowledge']['relations']} "
+                f"mesh_cells={record['knowledge']['mesh_cells']} "
+                f"embedding_vocab={record['knowledge']['embedding_vocab']}"
+            )
+            out.append("meta-learning:")
+            for bottleneck in record["meta_learning"]["bottlenecks"]:
+                out.append(f"  - bottleneck: {bottleneck}")
+            for hypothesis in record["meta_learning"]["hypotheses"]:
+                out.append(
+                    f"  - {hypothesis['kind']}: {hypothesis['description']} "
+                    f"[{hypothesis['status']}]"
+                )
+            return out
         if head == "/diff":
             snapshots = runtime.snapshot_store.recent(limit=2)
             if len(snapshots) < 2:

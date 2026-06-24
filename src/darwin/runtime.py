@@ -57,6 +57,7 @@ from darwin.mysterio.world_synthesis import WorldSynthesizer
 from darwin.mysterio.proprioception import InternalProprioceptionAdapter
 from darwin.mysterio.quarantine import QuarantineQueue
 from darwin.mysterio.snapshot import SnapshotStore
+from darwin.ng import DarwinNG, DarwinNGState
 from darwin.operator_model import OperatorModelRegistry
 from darwin.self_modification import ModificationOutcome, SelfModificationEngine
 from darwin.storage import PersistentStore
@@ -601,6 +602,15 @@ class DarwinRuntime:
             self.task_executor = None
             self.goal_orchestrator = None
 
+        # Darwin NG: next-generation cognitive stack. This is the
+        # integrator that turns the existing substrates into a single
+        # self-directed workspace: neuro-symbolic fusion, simulated
+        # consciousness metrics, intrinsic drives, goal generation,
+        # planning, knowledge integration, and meta-learning hypotheses.
+        self.ng = DarwinNG()
+        self.last_ng_state: DarwinNGState | None = None
+        self.last_ng_knowledge: dict[str, Any] = {}
+
         # V-Scale: feature flags + optional performance backends. Only
         # activate backends when their dependencies are present. The
         # pure-Python implementations remain the reference.
@@ -672,6 +682,7 @@ class DarwinRuntime:
             "interior_simulation": max(4.0, interval * 2.0),
             "narrator": max(20.0, interval * 10.0),
             "observer": max(5.0, interval * 2.5),
+            "ng": max(5.0, interval * 2.5),
         }
         if loop_intervals:
             defaults.update(loop_intervals)
@@ -698,6 +709,7 @@ class DarwinRuntime:
             BackgroundLoopSpec("narrator", self.loop_intervals["narrator"], self._loop_narrator),
             BackgroundLoopSpec("observer", self.loop_intervals["observer"], self._loop_observer),
             BackgroundLoopSpec("mesh", self.loop_intervals.get("mesh", max(5.0, self.interval * 2.0)), self._loop_mesh),
+            BackgroundLoopSpec("ng", self.loop_intervals.get("ng", max(5.0, self.interval * 2.5)), self._loop_ng),
         ]
         for spec in specs:
             thread = threading.Thread(
@@ -1083,6 +1095,27 @@ class DarwinRuntime:
                 loop="mesh",
             )
 
+    def _loop_ng(self) -> RuntimeEvent | None:
+        """Darwin NG cycle: integrated workspace + drives + self-directed plans."""
+
+        with self._lock:
+            state = self.ng.cycle(self)
+            self.last_ng_state = state
+            record = state.to_record()
+            top_drive = max(record["drives"].items(), key=lambda kv: kv[1])[0]
+            top_goal = record["goals"][0]["description"] if record["goals"] else "none"
+            content = (
+                f"Darwin NG cycle {state.cycle_id}: "
+                f"phi={record['workspace']['phi_proxy']:.2f} "
+                f"top_drive={top_drive} goal={top_goal}"
+            )
+            return self._event(
+                "ng",
+                content,
+                payload=record,
+                loop="ng",
+            )
+
     # -- on-demand cognition --------------------------------------------
 
     def cognition_cycle(self) -> RuntimeEvent:
@@ -1100,6 +1133,12 @@ class DarwinRuntime:
     def run_simulation(self) -> dict[str, Any] | None:
         self._loop_simulation()
         return self.last_simulation
+
+    def run_ng_cycle(self, stimulus: str | None = None) -> DarwinNGState:
+        with self._lock:
+            state = self.ng.cycle(self, stimulus=stimulus)
+            self.last_ng_state = state
+            return state
 
     # -- conversation ----------------------------------------------------
 
