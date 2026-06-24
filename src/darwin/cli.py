@@ -239,6 +239,17 @@ def main(argv: list[str] | None = None) -> int:
     train_rb.add_argument("label")
     train_sub.add_parser("list-checkpoints", help="List all labelled checkpoints.")
 
+    ng_train_parser = subparsers.add_parser(
+        "ng-train",
+        help="Run a visible Darwin NG self-training arena and render a watchable trace.",
+    )
+    ng_train_parser.add_argument("--cycles", type=int, default=8)
+    ng_train_parser.add_argument("--activate-every", type=int, default=3)
+    ng_train_parser.add_argument("--seed", type=int, default=17)
+    ng_train_parser.add_argument("--out", type=Path, default=None)
+    ng_train_parser.add_argument("--no-visual", action="store_true")
+    ng_train_parser.add_argument("--delay", type=float, default=0.0)
+
     args = parser.parse_args(argv)
     if args.command == "run":
         return run_room(args.steps, args.seed, args.exploration)
@@ -295,7 +306,44 @@ def main(argv: list[str] | None = None) -> int:
         return work_command(args)
     if args.command == "train":
         return train_command(args)
+    if args.command == "ng-train":
+        return ng_train_command(args)
     return 1
+
+
+def ng_train_command(args) -> int:
+    """Darwin NG visual self-training arena."""
+
+    from darwin.ng.training_arena import NGTrainingArena
+    from darwin.paths import data_dir
+
+    world = AdaptiveRoomWorld(seed=args.seed)
+    adapter = RoomSimulationAdapter(world)
+    darwin = Darwin(
+        actions=ensure_chat_action(adapter.possible_actions()),
+        seed=args.seed,
+        exploration_rate=0.08,
+    )
+    runtime = DarwinRuntime(
+        darwin=darwin,
+        adapter=adapter,
+        goal=Goal(desired={"room_bright": True}),
+        interval=100.0,
+        state_path=False,
+    )
+    out_dir = args.out or (data_dir() / "ng_training")
+    arena = NGTrainingArena(runtime, out_dir=out_dir)
+    session = arena.run(
+        cycles=max(1, args.cycles),
+        activate_every=max(0, args.activate_every),
+        visual=not args.no_visual,
+        delay=max(0.0, args.delay),
+    )
+    print()
+    print(f"Darwin NG training session: {session.session_id}")
+    print(f"trace: {session.trace_path}")
+    print(f"html:  {session.html_path}")
+    return 0
 
 
 def work_command(args) -> int:

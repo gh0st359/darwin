@@ -38,6 +38,9 @@ Darwin's existing substrates into one self-directed cycle:
   self-narrative, and introspection protocol
 - a strategic cortex with long-horizon objectives, capability portfolio,
   action policies, internal agent council, and autonomous campaigns
+- a visible self-training arena that runs Darwin NG through prompts, cycles its
+  NG state, activates durable goals, prints terminal frames, writes JSONL
+  traces, and renders an HTML session page
 
 The runtime wires this into a new `ng` background loop. Remote clients can
 inspect it with:
@@ -52,6 +55,7 @@ darwin inspect /ng life
 darwin inspect /ng curriculum
 darwin inspect /ng awareness
 darwin inspect /ng strategy
+darwin ng-train --cycles 8 --activate-every 3
 ```
 
 The `/ng` command runs one fresh cycle and reports the workspace, drives,
@@ -75,6 +79,10 @@ The `/ng awareness` command emits recursive self-observation: attention scenes,
 meta-observers, self-narrative, and introspection questions. The `/ng strategy`
 command emits long-horizon objectives, capability portfolio, action policies,
 agent council, campaigns, and strategic power index.
+The `darwin ng-train` command runs a watchable self-training session. Each
+cycle prompts Darwin, records its reply, runs a fresh NG cognition cycle,
+optionally promotes a self-generated goal into the autonomy ledger, prints a
+terminal frame, appends `trace.jsonl`, and writes `index.html`.
 
 This is the Phase 0/1/2 landing from the Darwin NG manifesto: ambitious,
 integrated, recursive, and growth-oriented. It treats autonomy as a real design
